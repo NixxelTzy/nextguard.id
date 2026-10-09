@@ -1,6 +1,6 @@
 import { redis, keys } from './redis'
 import { nanoid } from 'nanoid'
-import { hashApiKey } from './auth'
+import { hashSecret as hashApiKey } from './auth'
 
 export interface ApiKeyRecord {
   id: string
