@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
     const token = randomBytes(32).toString('base64url')
     await redis.setex(keys.magicToken(token), 900, { email, createdAt: Date.now() })
 
-    const base = process.env.NEXTAUTH_URL ?? 'http://localhost:3001'
+    const base = process.env.NEXT_PUBLIC_APP_URL ?? process.env.NEXTAUTH_URL ?? 'https://nextguard-id.vercel.app'
     const magicUrl = `${base}/api/auth/verify?token=${encodeURIComponent(token)}`
 
     await sendMagicLink(email, magicUrl)
