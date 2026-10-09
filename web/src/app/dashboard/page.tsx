@@ -4,6 +4,8 @@ import { getSession } from '@/lib/auth'
 import { getUserApiKeys } from '@/lib/apikeys'
 import DashboardClient from './DashboardClient'
 
+export const dynamic = 'force-dynamic'
+
 export default async function DashboardPage() {
   const session = await getSession().catch(() => null)
   if (!session) redirect('/login')
