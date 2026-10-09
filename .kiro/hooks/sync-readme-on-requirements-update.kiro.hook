@@ -1,0 +1,18 @@
+{
+  "enabled": true,
+  "name": "Sync README on Requirements Update",
+  "description": "Otomatis memperbarui README.md setiap kali requirements.md diubah, memastikan dokumentasi konfigurasi NextGuard selalu sinkron dengan spesifikasi terbaru.",
+  "version": "1",
+  "when": {
+    "type": "fileEdited",
+    "patterns": [
+      ".kiro/specs/web-firewall-anti-exploit/requirements.md"
+    ]
+  },
+  "then": {
+    "type": "askAgent",
+    "prompt": "Requirements untuk NextGuard telah diperbarui. Baca perubahan terbaru di requirements.md (c:\\Users\\Zenn1221\\OneDrive\\Documents\\NextGuard\\.kiro\\specs\\web-firewall-anti-exploit\\requirements.md), lalu perbarui README.md (c:\\Users\\Zenn1221\\OneDrive\\Documents\\NextGuard\\README.md) agar mencerminkan semua fitur dan konfigurasi terbaru. Pastikan: (1) semua jenis serangan baru ditambahkan di tabel Fitur Utama dan seksi Deteksi Serangan, (2) opsi konfigurasi baru ditambahkan di seksi Opsi Konfigurasi Lengkap, (3) contoh kode diperbarui jika ada perubahan API, (4) Changelog diperbarui dengan versi dan ringkasan perubahan."
+  },
+  "workspaceFolderName": "NextGuard",
+  "shortName": "sync-readme-on-requirements-update"
+}

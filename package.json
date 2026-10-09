@@ -1,51 +1,69 @@
 {
-  "name": "@nixxeltzy/nextguard",
-  "version": "1.3.1",
-  "description": "🛡️ NextGuard — 7-Layer DDoS Firewall & Active Defense Shield for Node.js and Next.js",
-  "main": "nextguard.js",
-  "types": "nextguard.d.ts",
+  "name": "nextguard",
+  "version": "1.0.0",
+  "description": "Enterprise-grade web application firewall middleware for Node.js. Zero config — just plug it in and full protection activates automatically.",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "require": "./nextguard.js",
-      "types": "./nextguard.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
     },
     "./middleware": {
-      "require": "./next-middleware.js",
-      "types": "./next-middleware.d.ts"
+      "types": "./dist/adapters/nextjs.d.ts",
+      "import": "./dist/adapters/nextjs.mjs",
+      "require": "./dist/adapters/nextjs.js"
     }
   },
+  "files": ["dist", "README.md", "LICENSE"],
+  "engines": { "node": ">=18.0.0" },
   "scripts": {
-    "test": "node test/nextguard.test.js",
-    "lint": "eslint nextguard.js"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:property": "vitest run test/property",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .ts",
+    "prepublishOnly": "npm run build && npm run test",
+    "fetch-geoip": "node scripts/fetch-geoip-data.js"
   },
   "keywords": [
-    "ddos",
-    "firewall",
-    "nextjs",
-    "nodejs",
-    "security",
-    "protection",
-    "rate-limit",
-    "middleware",
-    "attack",
-    "defense",
-    "shield",
-    "waf",
-    "nextguard"
+    "firewall", "waf", "security", "middleware", "nextjs", "express", "fastify",
+    "xss", "sqli", "sql-injection", "ddos", "rate-limiting", "intrusion-detection",
+    "honeypot", "tarpit", "bot-detection", "owasp", "csrf", "ssrf", "rce",
+    "path-traversal", "prototype-pollution", "request-smuggling", "zero-config"
   ],
-  "author": "NextGuard Team",
+  "author": "",
   "license": "MIT",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/NixxelTzy/nextguard.git"
+  "dependencies": {
+    "@maxmind/geoip2-node": "4.2.0",
+    "fast-check": "3.19.0",
+    "hdr-histogram-js": "3.0.0",
+    "jschardet": "3.0.0",
+    "lru-cache": "10.2.2",
+    "ua-parser-js": "1.0.38",
+    "uuid": "9.0.0"
   },
-  "bugs": {
-    "url": "https://github.com/NixxelTzy/nextguard/issues"
+  "devDependencies": {
+    "@types/node": "20.12.0",
+    "@types/ua-parser-js": "0.7.39",
+    "@types/uuid": "9.0.8",
+    "@vitest/coverage-v8": "1.6.0",
+    "tsup": "8.0.2",
+    "typescript": "5.4.5",
+    "vitest": "1.6.0"
   },
-  "homepage": "https://github.com/NixxelTzy/nextguard#readme",
-  "engines": {
-    "node": ">=14.0.0"
+  "peerDependencies": {
+    "next": ">=13.0.0",
+    "express": ">=4.0.0",
+    "fastify": ">=4.0.0"
   },
-  "dependencies": {},
-  "devDependencies": {}
+  "peerDependenciesMeta": {
+    "next": { "optional": true },
+    "express": { "optional": true },
+    "fastify": { "optional": true }
+  }
 }

@@ -1,0 +1,159 @@
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  background: #0a0a0a;
+  color: #e5e5e5;
+  font-family: system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: #60a5fa; }
+a:hover { text-decoration: underline; }
+
+/* Code */
+pre {
+  background: #111;
+  border: 1px solid #1a1a1a;
+  border-radius: 8px;
+  padding: 16px;
+  overflow-x: auto;
+  margin: 12px 0;
+}
+code {
+  background: #1a1a1a;
+  border: 1px solid #222;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.875em;
+  color: #7dd3fc;
+  font-family: 'Fira Code', 'Consolas', monospace;
+}
+pre code { background: none; border: none; padding: 0; color: #e5e5e5; }
+
+/* Prose for README */
+.prose h1 { font-size: 1.875rem; font-weight: 700; color: #fff; margin: 2rem 0 1rem; }
+.prose h2 { font-size: 1.5rem; font-weight: 600; color: #f0f0f0; margin: 1.75rem 0 0.75rem; border-bottom: 1px solid #1a1a1a; padding-bottom: 8px; }
+.prose h3 { font-size: 1.2rem; font-weight: 600; color: #e0e0e0; margin: 1.5rem 0 0.5rem; }
+.prose h4 { font-size: 1rem; font-weight: 600; color: #d0d0d0; margin: 1.25rem 0 0.5rem; }
+.prose p { color: #a3a3a3; line-height: 1.7; margin: 0.75rem 0; }
+.prose ul, .prose ol { color: #a3a3a3; padding-left: 1.5rem; margin: 0.75rem 0; }
+.prose li { margin: 0.3rem 0; line-height: 1.6; }
+.prose table { width: 100%; border-collapse: collapse; margin: 1rem 0; overflow-x: auto; display: block; }
+.prose th { background: #111; padding: 8px 12px; text-align: left; color: #e5e5e5; border: 1px solid #222; font-weight: 600; }
+.prose td { padding: 8px 12px; border: 1px solid #1a1a1a; color: #a3a3a3; }
+.prose blockquote { border-left: 3px solid #3b82f6; padding-left: 1rem; margin: 1rem 0; color: #737373; }
+.prose hr { border: none; border-top: 1px solid #1a1a1a; margin: 2rem 0; }
+.prose strong { color: #e5e5e5; }
+.prose em { color: #c0c0c0; }
+.prose a { color: #60a5fa; }
+
+/* Form inputs */
+.input {
+  background: #0a0a0a;
+  border: 1px solid #262626;
+  color: #fff;
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  width: 100%;
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+.input:focus { border-color: #3b82f6; }
+.input::placeholder { color: #555; }
+
+/* Buttons */
+.btn-primary {
+  background: #3b82f6;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 20px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.btn-primary:hover { background: #2563eb; }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: #a3a3a3;
+  border: 1px solid #1a1a1a;
+  border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.btn-ghost:hover { color: #fff; border-color: #333; }
+
+.btn-danger {
+  background: transparent;
+  color: #555;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 15px;
+  transition: color 0.15s;
+  font-family: inherit;
+}
+.btn-danger:hover { color: #f87171; }
+
+/* Cards */
+.card {
+  background: #111;
+  border: 1px solid #1a1a1a;
+  border-radius: 12px;
+  padding: 20px;
+}
+
+/* Nav */
+.nav {
+  border-bottom: 1px solid #1a1a1a;
+  position: sticky;
+  top: 0;
+  background: rgba(10,10,10,0.96);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+.nav-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 0 24px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* Badge */
+.badge {
+  font-size: 11px;
+  background: #1e3a5f;
+  color: #60a5fa;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid #1e40af;
+}
+
+/* Alert */
+.alert-warning {
+  background: #1c1200;
+  border: 1px solid #a16207;
+  border-radius: 12px;
+  padding: 16px 20px;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #0a0a0a; }
+::-webkit-scrollbar-thumb { background: #262626; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #333; }

@@ -1,6 +1,11 @@
-node_modules/
-.env
-*.log
-coverage/
-.nyc_output/
-dist/
+src/
+test/
+tsconfig.json
+tsup.config.ts
+.eslintrc*
+.gitignore
+*.test.ts
+*.spec.ts
+.kiro/
+scripts/
+*.map

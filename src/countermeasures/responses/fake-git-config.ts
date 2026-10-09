@@ -1,0 +1,30 @@
+/** Fake .git/config response */
+export function fakeGitConfigResponse(): string {
+  return `[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+	logallrefupdates = true
+	ignorecase = true
+	precomposeunicode = true
+
+[remote "origin"]
+	url = git@github.com:company/production-app.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+
+[branch "develop"]
+	remote = origin
+	merge = refs/heads/develop
+
+[user]
+	name = Deploy Bot
+	email = deploy@company.internal
+
+[credential]
+	helper = store
+`
+}
