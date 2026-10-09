@@ -1,18 +1,20 @@
 import nodemailer from 'nodemailer'
 
 export async function sendMagicLink(to: string, magicUrl: string): Promise<void> {
+  const user = process.env.GMAIL_USER
+  const pass = process.env.GMAIL_APP_PASSWORD
+
+  if (!user || !pass) {
+    throw new Error('GMAIL_USER and GMAIL_APP_PASSWORD environment variables are required')
+  }
+
   const transport = nodemailer.createTransport({
-    host: process.env.SMTP_HOST,
-    port: Number(process.env.SMTP_PORT ?? 587),
-    secure: false,
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
+    service: 'gmail',
+    auth: { user, pass },
   })
 
   await transport.sendMail({
-    from: process.env.SMTP_FROM ?? 'NextGuard <noreply@nextguard.dev>',
+    from: `NextGuard <${user}>`,
     to,
     subject: 'Sign in to NextGuard',
     html: `
