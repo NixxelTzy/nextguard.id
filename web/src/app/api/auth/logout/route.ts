@@ -11,3 +11,8 @@ export async function POST(req: NextRequest) {
   response.cookies.delete('ng_session')
   return response
 }
+
+// Required so Next.js does not fail to collect page data during build
+export async function GET() {
+  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+}
