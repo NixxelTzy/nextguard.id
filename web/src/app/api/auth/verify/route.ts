@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { redis, keys } from '@/lib/redis'
 import { createSession, getOrCreateUser } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token')
 

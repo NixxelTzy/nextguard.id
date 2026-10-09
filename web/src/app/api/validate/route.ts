@@ -18,6 +18,8 @@ import { createHash } from 'crypto'
 import { redis, keys } from '@/lib/redis'
 import type { ApiKeyRecord } from '@/lib/apikeys'
 
+export const dynamic = 'force-dynamic'
+
 function hashSecret(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }

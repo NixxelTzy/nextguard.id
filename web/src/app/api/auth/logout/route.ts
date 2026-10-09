@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { deleteSession } from '@/lib/auth'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
   const sid = req.cookies.get('ng_session')?.value
   if (sid) await deleteSession(sid).catch(() => {})

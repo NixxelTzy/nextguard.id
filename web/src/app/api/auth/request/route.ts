@@ -3,6 +3,8 @@ import { randomBytes } from 'crypto'
 import { redis, keys } from '@/lib/redis'
 import { sendMagicLink } from '@/lib/email'
 
+export const dynamic = 'force-dynamic'
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as { email?: string }
