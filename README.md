@@ -19,6 +19,7 @@ export { nextguard as middleware } from '@nextguard/nextguard'
 - [Quick Start](#quick-start)
 - [Dashboard & API Key](#dashboard--api-key)
 - [Environment Variables](#environment-variables)
+- [Vercel Deployment Guide](#vercel-deployment-guide)
 - [Framework Setup](#framework-setup)
   - [Next.js](#nextjs)
   - [Express.js](#expressjs)
@@ -166,9 +167,133 @@ if (result.valid) {
 
 ---
 
+---
+
+## Vercel Deployment Guide
+
+### Rate Limiting on Vercel (Multi-Instance)
+
+NextGuard uses **in-memory rate limiting** by default. On Vercel, each serverless instance has its own memory — so rate limits are per-instance, not shared globally.
+
+**Solution for shared rate limits:** Add `serverExternalPackages` to your `next.config.ts` to prevent webpack from bundling the package, and use NextGuard in API routes rather than middleware for the full 17-detector WAF:
+
+```ts
+// next.config.ts
+export default {
+  serverExternalPackages: ['@nextguard/nextguard'],
+}
+```
+
+For **true distributed rate limiting**, layer NextGuard attack detection with Upstash Redis for the rate limit check. NextGuard handles the WAF (SQLi, XSS, RCE, etc.) and Redis handles cross-instance rate limits.
+
+### How `firewall(req)` Works
+
+```ts
+const result = await firewall(req)
+
+// result === undefined  →  request ALLOWED — continue to your handler
+// result instanceof Response  →  request BLOCKED — return this response immediately
+
+if (result) return result   // ← always check this!
+// ... your route logic
+```
+
+### Verify Firewall is Active
+
+**Quick test with curl — send a SQLi payload, expect 403:**
+```bash
+curl -X POST https://your-app.vercel.app/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "admin'\''--", "password": "x"}'
+# Expected: {"error":"Forbidden","reason":"sqli"}  HTTP 403
+```
+
+**DoS test — burst 50 requests quickly:**
+```bash
+for i in $(seq 1 50); do curl -s -o /dev/null -w "%{http_code}\n" https://your-app.vercel.app/api/test; done
+# Expected: first ~30 return 200, rest return 429
+```
+
+**Enable debug logging to see all decisions:**
+```ts
+export const firewall = createFirewall({ logging: 'debug' })
+```
+
+**Check dashboard** at [nextguard-id.vercel.app/dashboard](https://nextguard-id.vercel.app/dashboard) — stats update within 1 second once `NEXTGUARD_API_KEY` is set.
+
+### Strict Config for DoS Protection
+
+```ts
+import { createFirewall } from '@nextguard/nextguard'
+
+export const firewall = createFirewall({
+  logging: 'warn',
+  rateLimit: { maxRequests: 30, windowMs: 5_000 },  // 30 req per 5 seconds
+  autoBan: {
+    threshold: 3,             // ban after 3 violations
+    banDurationMs: 3_600_000, // 1 hour
+  },
+  honeypot: { enabled: true, responseDelay: 10_000 },
+})
+```
+
+### Edge vs Node.js Subpaths
+
+| Import | Runtime | Features |
+|--------|---------|---------|
+| `@nextguard/nextguard` | Node.js (API routes, serverless) | Full — 17 detectors + GeoIP + compression bomb detection |
+| `@nextguard/nextguard/edge` | Edge Runtime (middleware.ts) | 17 detectors — no GeoIP, no zlib, 100% Web API |
+
+```ts
+// middleware.ts — MUST use /edge for Edge Runtime
+export { nextguard as middleware } from '@nextguard/nextguard/edge'
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+}
+```
+
+---
+
 ## Framework Setup
 
 ### Next.js
+
+**Vercel Edge Runtime (recommended for middleware.ts):**
+
+> ⚠️ Use the `/edge` subpath for Next.js middleware — it uses only Web APIs (no `node:zlib`, `node:crypto`, etc.)
+
+```ts
+// middleware.ts — uses /edge subpath, 100% Edge Runtime compatible
+export { nextguard as middleware } from '@nextguard/nextguard/edge'
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+}
+```
+
+**Node.js API Routes (full 17-detector WAF):**
+
+```ts
+// lib/nextguard.ts — for API routes running on Node.js serverless
+import { createFirewall } from '@nextguard/nextguard'
+
+export const firewall = createFirewall({
+  logging: 'warn',
+  autoBan: { threshold: 5, banDurationMs: 3_600_000 },
+  rateLimit: { maxRequests: 30, windowMs: 5_000 }, // 30 req/5s burst limit
+})
+```
+
+```ts
+// In each API route handler:
+const blocked = await firewall(req)
+if (blocked) return blocked   // firewall returns Response when blocking, undefined when allowing
+
+// ... your route logic
+```
+
+> **Important:** `firewall(req)` returns `undefined` for allowed requests and a `Response` for blocked ones. Always check the return value.
 
 **Zero config (recommended):**
 

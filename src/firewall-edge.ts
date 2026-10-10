@@ -42,6 +42,8 @@ import { buildSecurityHeaders } from './security-headers.js'
 import { matchPath, getPathSensitivity, getDefaultRateLimit } from './path-matcher.js'
 import { HoneypotSystem } from './countermeasures/honeypot.js'
 import { TarpitManager } from './countermeasures/tarpit.js'
+// Edge-compatible payload analyzer (no Buffer/zlib)
+import { analyzePayloadEdge } from './payload/analyzer-edge.js'
 
 import type {
   FirewallConfig,
@@ -255,6 +257,15 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       on('openRedirect')       ? runSafe(() => detectOpenRedirect(query, headersObj['host'] ?? '')) : null,
     ])
     for (const s of results) { if (s) allSignals.push(s) }
+
+    // Payload analysis (Edge-safe — no zlib/Buffer)
+    const payloadResult = await runSafe(() => analyzePayloadEdge(rawBody, contentType, '', parsedBody))
+    if (payloadResult?.blocked) {
+      _recordBlock(payloadResult.blockReason ?? 'payload_error')
+      return jsonResponse(payloadResult.blockStatus ?? 400, 'Bad Request', payloadResult.blockReason ?? 'payload_error')
+    }
+    if (payloadResult?.signals) allSignals.push(...payloadResult.signals)
+
     layerTrace[4].durationMs = Date.now() - l5
 
     // ── Layer 6: Behavioral ───────────────────────────────────────────────────
