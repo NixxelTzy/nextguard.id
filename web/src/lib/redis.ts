@@ -26,4 +26,9 @@ export const keys = {
   apiKey: (kid: string) => `ng:apikey:${kid}`,
   apiKeyHash: (hash: string) => `ng:apikey:hash:${hash}`,
   session: (sid: string) => `ng:session:${sid}`,
+  // Stats keys (written by the npm package via /api/report)
+  statsRequests: (uid: string, hour: string) => `ng:stats:req:${uid}:${hour}`,
+  statsBlocked: (uid: string, hour: string) => `ng:stats:blocked:${uid}:${hour}`,
+  statsAttacks: (uid: string) => `ng:stats:attacks:${uid}`,
+  statsTokens: (uid: string) => `ng:stats:tokens:${uid}`,
 }
