@@ -1,5 +1,5 @@
 {
-  "name": "nextguard",
+  "name": "@nextguard/nextguard",
   "version": "3.0.0",
   "description": "Enterprise-grade L7 web application firewall for Node.js. Zero config — 17 attack detectors, behavioral analysis, and dashboard integration.",
   "main": "./dist/index.js",
