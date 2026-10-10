@@ -44,7 +44,8 @@ export default defineConfig([
       const nodeBuiltins = [
         'node:crypto', 'node:fs', 'node:net', 'node:path',
         'node:module', 'node:os', 'node:stream', 'node:buffer',
-        'crypto', 'fs', 'net', 'path', 'os', 'stream', 'buffer',
+        'node:zlib', 'node:util',
+        'crypto', 'fs', 'net', 'path', 'os', 'stream', 'buffer', 'zlib', 'util',
         '@maxmind/geoip2-node', 'jschardet',
       ]
       options.external = [
