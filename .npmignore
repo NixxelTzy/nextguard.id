@@ -1,14 +1,14 @@
-src/
-test/
-tsconfig.json
-tsup.config.ts
-.eslintrc*
-.gitignore
-*.test.ts
-*.spec.ts
-.kiro/
-scripts/
-*.map
+# Dashboard web app — never publish
 web/
+
+# Environment files — never publish secrets
 .env
 .env.*
+
+# Git and editor configs
+.gitignore
+.kiro/
+.vscode/
+
+# Compiled source maps
+*.map

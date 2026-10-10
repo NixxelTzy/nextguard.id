@@ -17,7 +17,7 @@
       "require": "./dist/adapters/nextjs.js"
     }
   },
-  "files": ["dist", "README.md", "LICENSE"],
+  "files": ["dist", "src", "test", "scripts", "README.md", "LICENSE", "tsconfig.json", "tsup.config.ts"],
   "engines": { "node": ">=18.0.0" },
   "scripts": {
     "build": "tsup",
