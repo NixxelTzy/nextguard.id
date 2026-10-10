@@ -9,3 +9,6 @@ tsup.config.ts
 .kiro/
 scripts/
 *.map
+web/
+.env
+.env.*
