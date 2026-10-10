@@ -1,36 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { redis, keys } from '@/lib/redis'
-import { createSession, getOrCreateUser } from '@/lib/auth'
+import { activatePendingUser } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
+// Legacy verify route — redirects to new confirm endpoint
 export async function GET(req: NextRequest) {
   const token = req.nextUrl.searchParams.get('token')
+  const base = process.env.NEXT_PUBLIC_APP_URL ?? 'https://nextguard-id.vercel.app'
 
   if (!token) {
-    return NextResponse.redirect(new URL('/login?error=invalid', req.url))
+    return NextResponse.redirect(new URL('/register-confirm?status=invalid', base))
   }
 
-  const data = await redis.get<{ email: string }>(keys.magicToken(token))
+  const user = await activatePendingUser(token).catch(() => null)
 
-  if (!data) {
-    return NextResponse.redirect(new URL('/login?error=expired', req.url))
+  if (!user) {
+    return NextResponse.redirect(new URL('/register-confirm?status=expired', base))
   }
 
-  // One-time use — delete immediately
-  await redis.del(keys.magicToken(token))
-
-  const user = await getOrCreateUser(data.email)
-  const sid = await createSession(user.id, data.email)
-
-  const response = NextResponse.redirect(new URL('/dashboard', req.url))
-  response.cookies.set('ng_session', sid, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax',
-    maxAge: 86400, // 24 hours
-    path: '/',
-  })
-
-  return response
+  return NextResponse.redirect(new URL('/register-confirm?status=success', base))
 }
