@@ -11,6 +11,7 @@
 import { createFirewall } from '../firewall.js'
 import { buildSecurityHeaders } from '../security-headers.js'
 import { extractClientIp } from '../ip/extractor.js'
+import { matchPath } from '../path-matcher.js'
 import type { FirewallConfig } from '../types.js'
 
 type FastifyInstance = {
@@ -112,10 +113,9 @@ export async function nextguardPlugin(
 
       if (result && result.status !== 200) {
         const urlObj = new URL(url)
-        const matchedRule = config.rules?.find((r: { path: string }) => {
-          const { matchPath } = require('../path-matcher.js')
-          return matchPath(r.path, urlObj.pathname)
-        })
+        const matchedRule = config.rules?.find((r: { path: string }) =>
+          matchPath(r.path, urlObj.pathname)
+        )
 
         if (matchedRule?.forceTerminate && reply.raw?.socket?.destroy) {
           reply.hijack()

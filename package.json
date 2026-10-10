@@ -1,24 +1,41 @@
 {
   "name": "@nextguard/nextguard",
-  "version": "3.0.0",
+  "version": "3.1.0",
   "description": "Enterprise-grade L7 web application firewall for Node.js. Zero config — 17 attack detectors, behavioral analysis, and dashboard integration.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "edge-light": "./dist/index.mjs",
+      "worker": "./dist/index.mjs",
       "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
     },
     "./middleware": {
-      "types": "./dist/adapters/nextjs.d.ts",
+      "edge-light": "./dist/adapters/nextjs.mjs",
+      "worker": "./dist/adapters/nextjs.mjs",
+      "browser": "./dist/adapters/nextjs.mjs",
       "import": "./dist/adapters/nextjs.mjs",
-      "require": "./dist/adapters/nextjs.js"
+      "require": "./dist/adapters/nextjs.js",
+      "types": "./dist/adapters/nextjs.d.ts"
     }
   },
-  "files": ["dist", "src", "test", "scripts", "README.md", "LICENSE", "tsconfig.json", "tsup.config.ts"],
-  "engines": { "node": ">=18.0.0" },
+  "sideEffects": false,
+  "files": [
+    "dist",
+    "src",
+    "test",
+    "scripts",
+    "README.md",
+    "LICENSE",
+    "tsconfig.json",
+    "tsup.config.ts"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
@@ -31,10 +48,30 @@
     "fetch-geoip": "node scripts/fetch-geoip-data.js"
   },
   "keywords": [
-    "firewall", "waf", "security", "middleware", "nextjs", "express", "fastify",
-    "xss", "sqli", "sql-injection", "ddos", "rate-limiting", "intrusion-detection",
-    "honeypot", "tarpit", "bot-detection", "owasp", "csrf", "ssrf", "rce",
-    "path-traversal", "prototype-pollution", "request-smuggling", "zero-config"
+    "firewall",
+    "waf",
+    "security",
+    "middleware",
+    "nextjs",
+    "express",
+    "fastify",
+    "xss",
+    "sqli",
+    "sql-injection",
+    "ddos",
+    "rate-limiting",
+    "intrusion-detection",
+    "honeypot",
+    "tarpit",
+    "bot-detection",
+    "owasp",
+    "csrf",
+    "ssrf",
+    "rce",
+    "path-traversal",
+    "prototype-pollution",
+    "request-smuggling",
+    "zero-config"
   ],
   "author": "",
   "license": "MIT",
@@ -62,8 +99,14 @@
     "fastify": ">=4.0.0"
   },
   "peerDependenciesMeta": {
-    "next": { "optional": true },
-    "express": { "optional": true },
-    "fastify": { "optional": true }
+    "next": {
+      "optional": true
+    },
+    "express": {
+      "optional": true
+    },
+    "fastify": {
+      "optional": true
+    }
   }
 }

@@ -11,6 +11,7 @@
 import { createFirewall } from '../firewall.js'
 import { buildSecurityHeaders } from '../security-headers.js'
 import { extractClientIp } from '../ip/extractor.js'
+import { matchPath } from '../path-matcher.js'
 import type { FirewallConfig } from '../types.js'
 
 type ExpressRequest = {
@@ -91,12 +92,8 @@ export function nextguardExpress(config: FirewallConfig = {}) {
           res.setHeader(k, v)
         }
 
-        // Force terminate if configured for this path
         const url = new URL(fullUrl)
-        const matchedRule = config.rules?.find(r => {
-          const { matchPath } = require('../path-matcher.js')
-          return matchPath(r.path, url.pathname)
-        })
+        const matchedRule = config.rules?.find(r => matchPath(r.path, url.pathname))
 
         if (matchedRule?.forceTerminate && res.socket?.destroy) {
           res.socket.destroy()

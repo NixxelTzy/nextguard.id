@@ -32,6 +32,14 @@ function loadGeoReaders(): void {
   if (geoLoadAttempted) return
   geoLoadAttempted = true
 
+  // Skip GeoIP loading in Edge Runtime — no Node.js fs/module access
+  const isEdgeRuntime =
+    typeof process === 'undefined' ||
+    (typeof process !== 'undefined' && process.env.NEXT_RUNTIME === 'edge') ||
+    typeof __dirname === 'undefined'
+
+  if (isEdgeRuntime) return
+
   try {
     // Use createRequire to work in both CJS and ESM
     const { createRequire } = require('node:module')

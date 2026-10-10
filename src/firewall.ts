@@ -10,7 +10,17 @@
  * Layer 7: Composite Scoring & Action (score → block/flag/pass + security headers)
  */
 
-import { v4 as uuidv4 } from 'uuid'
+// Edge Runtime compatible UUID — uses Web Crypto API (available in Edge, Node.js 18+, browsers)
+function uuidv4(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  // Pure JS fallback for very old environments
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, c => {
+    const r = (Math.random() * 16) | 0
+    return (c === 'x' ? r : (r & 0x3) | 0x8).toString(16)
+  })
+}
 
 // Detectors
 import { detectSqli } from './detectors/sqli.js'
