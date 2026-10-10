@@ -5,6 +5,14 @@ import { sendMagicLink } from '@/lib/email'
 
 export const dynamic = 'force-dynamic'
 
+// Parse allowed emails from env — comma separated
+function getAllowedEmails(): Set<string> {
+  const raw = process.env.ALLOWED_EMAILS ?? ''
+  return new Set(
+    raw.split(',').map(e => e.trim().toLowerCase()).filter(Boolean)
+  )
+}
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json() as { email?: string }
@@ -12,6 +20,13 @@ export async function POST(req: NextRequest) {
 
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return NextResponse.json({ error: 'Please enter a valid email address.' }, { status: 400 })
+    }
+
+    // Whitelist check — only pre-approved emails can sign in
+    const allowed = getAllowedEmails()
+    if (allowed.size > 0 && !allowed.has(email)) {
+      // Return same message as success to avoid email enumeration
+      return NextResponse.json({ success: true })
     }
 
     // Rate limit: max 3 magic links per email per 5 minutes
