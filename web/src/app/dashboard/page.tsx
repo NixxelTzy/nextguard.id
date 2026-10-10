@@ -13,80 +13,73 @@ export default async function DashboardPage() {
   const apiKeys = await getUserApiKeys(session.userId).catch(() => [])
 
   return (
-    <div style={{ minHeight: '100vh' }}>
+    <div style={{ minHeight: '100vh', background: '#080810' }}>
       {/* Nav */}
-      <nav className="nav">
-        <div className="nav-inner">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+      <nav style={{
+        borderBottom: '1px solid #1a1a2e', position: 'sticky', top: 0,
+        background: 'rgba(8,8,16,0.96)', backdropFilter: 'blur(12px)', zIndex: 10,
+      }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 24px', height: 58, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 24 }}>
             <Link href="/" style={{ display: 'flex', alignItems: 'center', gap: 8, textDecoration: 'none' }}>
-              <span style={{ fontSize: 20 }}>🛡️</span>
-              <span style={{ fontWeight: 700, color: '#fff', fontSize: 14 }}>NextGuard</span>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" fill="#3b82f6"/>
+              </svg>
+              <span style={{ fontWeight: 700, color: '#fff', fontSize: 15 }}>NextGuard</span>
             </Link>
-            <div style={{ display: 'flex', gap: 16, fontSize: 13 }}>
-              <span style={{ color: '#fff', fontWeight: 600, borderBottom: '2px solid #3b82f6', paddingBottom: 4 }}>Dashboard</span>
-              <Link href="/#docs" style={{ color: '#555', textDecoration: 'none' }}>Docs</Link>
-              <Link href="/#install" style={{ color: '#555', textDecoration: 'none' }}>Install</Link>
+            <div style={{ display: 'flex', gap: 4 }}>
+              {[['Dashboard', '/dashboard', true], ['Docs', '/#docs', false], ['Install', '/#install', false]].map(([label, href, active]) => (
+                <Link key={String(label)} href={String(href)} style={{
+                  color: active ? '#fff' : '#4a4a6a', fontSize: 13, fontWeight: active ? 600 : 400,
+                  padding: '5px 12px', borderRadius: 8, textDecoration: 'none',
+                  background: active ? '#1a1a2e' : 'transparent',
+                  transition: 'all 0.15s',
+                }}>
+                  {String(label)}
+                </Link>
+              ))}
             </div>
           </div>
+
           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <span style={{ color: '#444', fontSize: 12, display: 'none' }} className="email-display">{session.email}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ width: 30, height: 30, background: '#1e3a5f', border: '1px solid #1e40af', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>
+                {(session.username ?? session.email)[0]?.toUpperCase()}
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <span style={{ color: '#e5e5e5', fontSize: 13, fontWeight: 600, lineHeight: 1 }}>{session.username ?? 'User'}</span>
+                <span style={{ color: '#4a4a6a', fontSize: 10 }}>{session.email}</span>
+              </div>
+            </div>
             <form action="/api/auth/logout" method="POST">
-              <button type="submit" className="btn-ghost" style={{ fontSize: 12, padding: '5px 12px' }}>Sign out</button>
+              <button type="submit" style={{
+                background: 'transparent', color: '#4a4a6a', border: '1px solid #1a1a2e',
+                borderRadius: 8, padding: '6px 14px', fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+                transition: 'all 0.15s',
+              }}>
+                Sign out
+              </button>
             </form>
           </div>
         </div>
       </nav>
 
-      <main style={{ maxWidth: 960, margin: '0 auto', padding: '40px 24px' }}>
-        {/* Header */}
-        <div style={{ marginBottom: 36 }}>
-          <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: '#fff', marginBottom: 6 }}>API Keys</h1>
-          <p style={{ color: '#555', fontSize: 14, lineHeight: 1.6 }}>
-            Create API keys to connect your NextGuard deployments to this account.<br />
-            Keys are shown <strong style={{ color: '#888' }}>only once</strong> — save them securely.
+      <main style={{ maxWidth: 1280, margin: '0 auto', padding: '28px 24px' }}>
+        {/* Page header */}
+        <div style={{ marginBottom: 24 }}>
+          <h1 style={{ fontSize: '1.4rem', fontWeight: 700, color: '#fff', marginBottom: 4 }}>
+            Welcome back, {session.username ?? 'User'}
+          </h1>
+          <p style={{ color: '#4a4a6a', fontSize: 13 }}>
+            Monitor your firewall, manage API keys, and track protection status.
           </p>
         </div>
 
-        {/* Stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 12, marginBottom: 36 }}>
-          {[
-            { label: 'Active Keys', value: String(apiKeys.length), color: '#fff' },
-            { label: 'Account', value: '✓ Active', color: '#4ade80' },
-            { label: 'Protection', value: 'L7 Enterprise', color: '#a78bfa' },
-            { label: 'Distribution', value: 'Redis Enabled', color: '#60a5fa' },
-          ].map(s => (
-            <div key={s.label} className="card">
-              <div style={{ fontSize: 17, fontWeight: 700, color: s.color, marginBottom: 3 }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: '#444', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{s.label}</div>
-            </div>
-          ))}
-        </div>
-
-        {/* User info */}
-        <div style={{ background: '#0d0d0d', border: '1px solid #1a1a1a', borderRadius: 8, padding: '10px 16px', marginBottom: 28, display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ width: 28, height: 28, background: '#1e3a5f', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, color: '#60a5fa', fontWeight: 700 }}>
-            {session.email[0]?.toUpperCase()}
-          </div>
-          <span style={{ color: '#666', fontSize: 13 }}>{session.email}</span>
-        </div>
-
-        {/* Client component */}
-        <DashboardClient initialKeys={apiKeys} />
-
-        {/* Usage instructions */}
-        <div className="card" style={{ marginTop: 32 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 600, color: '#fff', marginBottom: 10 }}>Connect your deployment</h3>
-          <p style={{ color: '#555', fontSize: 13, marginBottom: 14, lineHeight: 1.5 }}>
-            Set the environment variable in your project to connect NextGuard to this account:
-          </p>
-          <pre style={{ margin: 0 }}>
-            <code style={{ background: 'none', border: 'none', padding: 0, color: '#4ade80', fontSize: 12, display: 'block', lineHeight: 1.7 }}>{`# .env.local
-NEXTGUARD_API_KEY=ng_your_key_here`}</code>
-          </pre>
-          <p style={{ color: '#444', fontSize: 12, marginTop: 12, lineHeight: 1.5 }}>
-            NextGuard reads this at startup and uses it to connect to the shared Redis state for distributed rate limits, reputation scores, and block lists across all your instances.
-          </p>
-        </div>
+        <DashboardClient
+          initialKeys={apiKeys}
+          email={session.email}
+          username={session.username ?? ''}
+        />
       </main>
     </div>
   )
