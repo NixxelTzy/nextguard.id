@@ -25,7 +25,7 @@ import { detectSsrf } from './detectors/ssrf.js'
 import { detectPathTraversal } from './detectors/path-traversal.js'
 import { detectCrlf } from './detectors/crlf.js'
 import { detectRequestSmuggling } from './detectors/request-smuggling.js'
-import { detectPrototypePollution, detectPrototypePollutionInFields } from './detectors/prototype-pollution.js'
+import { detectPrototypePollution } from './detectors/prototype-pollution.js'
 import { detectOpenRedirect } from './detectors/open-redirect.js'
 import { detectMethodOverride } from './detectors/method-override.js'
 import { detectHpp } from './detectors/hpp.js'
@@ -42,7 +42,7 @@ import { RateLimiter } from './ddos/rate-limiter.js'
 import { EmergencyShield } from './ddos/emergency-shield.js'
 import { AutoBanManager } from './auto-ban.js'
 import { BehavioralTracker } from './behavioral/tracker.js'
-import { buildSecurityHeaders, applySecurityHeaders } from './security-headers.js'
+import { buildSecurityHeaders } from './security-headers.js'
 import { matchPath, getPathSensitivity, getDefaultRateLimit } from './path-matcher.js'
 import { Logger } from './logger.js'
 import { AutoTuner } from './auto-tune.js'
@@ -55,7 +55,6 @@ import type {
   FirewallConfig,
   FirewallInstance,
   ThreatSignal,
-  RequestContext,
   LayerTraceEntry,
   BannedIpEntry,
   FirewallStats,
@@ -65,106 +64,122 @@ import type {
 
 // ─── Bulkhead isolation wrapper ───────────────────────────────────────────────
 async function runSafe<T>(fn: () => T | Promise<T>): Promise<T | null> {
-  try {
-    return await fn()
-  } catch {
-    return null
-  }
+  try { return await fn() } catch { return null }
+}
+
+function jsonResponse(status: number, error: string, reason: string): Response {
+  return new Response(JSON.stringify({ error, reason }), {
+    status, headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 // ─── Factory ──────────────────────────────────────────────────────────────────
 export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
-  const logger = new Logger(config.logging ?? 'info', config.customLogger)
-  const scoring = new CompositeScoringEngine()
-  const rateLimiter = new RateLimiter()
+  const logger    = new Logger(config.logging ?? 'info', config.customLogger)
+  const scoring   = new CompositeScoringEngine()
+  const rateLimiter   = new RateLimiter()
   const emergencyShield = new EmergencyShield(config.heavyDefense?.globalConcurrentLimit ?? 10_000)
-  const autoBan = new AutoBanManager(config.autoBan)
+  const autoBan   = new AutoBanManager(config.autoBan)
   const behavioral = new BehavioralTracker()
   const autoTuner = new AutoTuner()
-  const honeypot = new HoneypotSystem(config.honeypot?.customPaths)
-  const tarpit = new TarpitManager()
-  const loggerForWatchdog: { info: (e: object) => void } = {
+  const honeypot  = new HoneypotSystem(config.honeypot?.customPaths)
+  const tarpit    = new TarpitManager()
+  const watchdog  = new RecoveryWatchdog(5_000, {
     info: (e: object) => logger.info(e as Omit<LogEvent, 'timestamp'>),
-  }
-  const watchdog = new RecoveryWatchdog(5_000, loggerForWatchdog)
-
-  const ipReputation = config.heavyDefense?.ipReputation ?? []
-  const ipWhitelist = config.ipWhitelist ?? []
-  const startTime = Date.now()
-  let totalBlocked = 0
-
-  watchdog.register({ name: 'rate_limiter', healthCheck: () => { rateLimiter.cleanup() } })
-  watchdog.register({ name: 'behavioral', healthCheck: () => { behavioral.pruneExpiredData() } })
-  watchdog.register({ name: 'auto_ban', healthCheck: () => {} })
-  watchdog.start()
-
-  // Log startup manifest
-  logger.info({
-    event: 'nextguard_started',
-    mode: 'auto',
-    layers: 7,
-    detectorsActive: 17,
   })
 
-  // ─── Validate API key with dashboard (non-blocking) ───────────────────────
-  // Runs in background — firewall starts immediately regardless of result
+  const ipReputation = config.heavyDefense?.ipReputation ?? []
+  const ipWhitelist  = config.ipWhitelist ?? []
+  const startTime    = Date.now()
+  let totalBlocked   = 0
+
+  watchdog.register({ name: 'rate_limiter', healthCheck: () => rateLimiter.cleanup() })
+  watchdog.register({ name: 'behavioral',   healthCheck: () => behavioral.pruneExpiredData() })
+  watchdog.register({ name: 'auto_ban',     healthCheck: () => {} })
+  watchdog.start()
+
+  logger.info({ event: 'nextguard_started', mode: 'auto', layers: 7, detectorsActive: 17 })
+
+  // ─── Pending stats for dashboard reporting ────────────────────────────────
+  const _pending = {
+    requests: 0,
+    blocked:  0,
+    attacks:  {} as Record<string, number>,
+  }
+
+  function _recordBlock(attackType?: string): void {
+    totalBlocked++
+    _pending.blocked++
+    if (attackType) {
+      _pending.attacks[attackType] = (_pending.attacks[attackType] ?? 0) + 1
+    }
+  }
+
+  // ─── Validate API key + start stats reporter ──────────────────────────────
   const apiKey = process.env.NEXTGUARD_API_KEY
   if (apiKey) {
-    import('./api-connect.js').then(({ validateApiKey }) => {
+    import('./api-connect.js').then(({ validateApiKey, reportStats }) => {
       validateApiKey(apiKey).then(result => {
-        if (result.valid) {
-          logger.info({
-            event: 'api_key_validated',
-            reason: `keyId=${result.keyId} label=${result.label} ns=${result.redisNamespace}`,
-          })
-        } else {
-          logger.info({
-            event: 'api_key_validation_failed',
-            reason: result.error,
-          })
+        logger.info({
+          event: result.valid ? 'api_key_validated' : 'api_key_validation_failed',
+          reason: result.valid
+            ? `keyId=${result.keyId} label=${result.label} ns=${result.redisNamespace}`
+            : result.error,
+        })
+      }).catch(() => {})
+
+      // Report every 1 second (configurable via NEXTGUARD_REPORT_INTERVAL)
+      const ms = Number(process.env.NEXTGUARD_REPORT_INTERVAL ?? 1) * 1000
+      const timer = setInterval(() => {
+        const snap = { requests: _pending.requests, blocked: _pending.blocked, attacks: { ..._pending.attacks } }
+        _pending.requests = 0
+        _pending.blocked  = 0
+        _pending.attacks  = {}
+        if (snap.requests > 0 || snap.blocked > 0) {
+          reportStats(apiKey, { ...snap, tokensUsed: snap.requests }).catch(() => {})
         }
-      }).catch(() => {
-        // Validation errors never affect firewall operation
-      })
+      }, ms)
+      if (typeof timer.unref === 'function') timer.unref()
     }).catch(() => {})
   }
 
-  // ─── Main request handler ────────────────────────────────────────────────
+  // ─── Main request handler ──────────────────────────────────────────────────
   async function handler(req: Request): Promise<Response | undefined> {
-    const requestId = uuidv4()
+    const requestId        = uuidv4()
     const arrivalTimestamp = Date.now()
     const layerTrace: LayerTraceEntry[] = []
-    const allSignals: ThreatSignal[] = []
+    const allSignals: ThreatSignal[]    = []
 
     emergencyShield.increment()
+    _pending.requests++
 
     try {
-      // ── Parse request ──────────────────────────────────────────────────
+      // ── Parse URL ─────────────────────────────────────────────────────
       let url: URL
       try {
         url = new URL(req.url)
       } catch {
-        emergencyShield.decrement()
         return new Response(JSON.stringify({ error: 'Bad Request', reason: 'invalid_url' }), {
           status: 400, headers: { 'Content-Type': 'application/json' },
         })
       }
 
-      const pathname = url.pathname
+      const pathname        = url.pathname
       const headersObj: Record<string, string> = {}
       req.headers.forEach((v, k) => { headersObj[k.toLowerCase()] = v })
 
-      const clientIp = extractClientIp(headersObj)
-      const contentType = headersObj['content-type'] ?? ''
+      const clientIp       = extractClientIp(headersObj)
+      const contentType    = headersObj['content-type'] ?? ''
       const contentEncoding = headersObj['content-encoding'] ?? ''
 
-      let rawBody = ''
+      // ── Read body ─────────────────────────────────────────────────────
+      let rawBody    = ''
       let parsedBody: unknown = null
       try {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           rawBody = await req.text()
           if (rawBody.length > 10 * 1024 * 1024) {
-            totalBlocked++
+            _recordBlock('payload_too_large')
             return jsonResponse(413, 'Payload Too Large', 'payload_too_large')
           }
           if (/json/i.test(contentType)) {
@@ -176,285 +191,224 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       const query: Record<string, string> = {}
       url.searchParams.forEach((v, k) => { query[k] = v })
 
-      // ── Normalize all fields ───────────────────────────────────────────
+      // ── Normalize ─────────────────────────────────────────────────────
+      const SKIP_HEADERS = new Set(['accept', 'accept-encoding', 'accept-language', 'connection', 'host', 'cache-control'])
       const allFields: Record<string, string> = { url: pathname, body: rawBody, ...query }
       for (const [k, v] of Object.entries(headersObj)) {
-        const SKIP = new Set(['accept', 'accept-encoding', 'accept-language', 'connection', 'host', 'cache-control'])
-        if (!SKIP.has(k)) allFields[`header:${k}`] = v
+        if (!SKIP_HEADERS.has(k)) allFields[`header:${k}`] = v
       }
       const { normalized: normalizedFields } = normalizeFields(allFields)
 
-      // ── Find matching rule ────────────────────────────────────────────
+      // ── Custom rule allow-bypass ──────────────────────────────────────
       const matchedRule = config.rules?.find(r => matchPath(r.path, pathname))
       if (matchedRule?.action === 'allow') {
-        const secHeaders = buildSecurityHeaders(config.securityHeaders, pathname)
-        return new Response(null, { status: 200, headers: secHeaders })
+        return new Response(null, { status: 200, headers: buildSecurityHeaders(config.securityHeaders, pathname) })
       }
 
-      // ── Check honeypot ─────────────────────────────────────────────────
+      // ── Honeypot ──────────────────────────────────────────────────────
       if (config.honeypot?.enabled !== false && honeypot.isHoneypotPath(pathname)) {
-        const honeypotResponse = honeypot.getHoneypotResponse(pathname)
-        if (honeypotResponse) {
+        const hp = honeypot.getHoneypotResponse(pathname)
+        if (hp) {
           updateIpProfile(clientIp, { honeypotTriggered: true })
           autoBan.ban(clientIp, 'honeypot_triggered', 24 * 60 * 60_000)
           logger.info({ event: 'honeypot_triggered', clientIp, path: pathname, requestId })
-          totalBlocked++
-
-          // Tarpit delay
-          const delayMs = config.honeypot?.responseDelay ?? (10_000 + Math.random() * 20_000)
-          await new Promise(r => setTimeout(r, Math.min(delayMs, 30_000)))
-
-          return new Response(honeypotResponse.responseBody, {
-            status: 200,
-            headers: { 'Content-Type': honeypotResponse.contentType },
-          })
+          _recordBlock('honeypot_triggered')
+          const delay = config.honeypot?.responseDelay ?? (10_000 + Math.random() * 20_000)
+          await new Promise(r => setTimeout(r, Math.min(delay, 30_000)))
+          return new Response(hp.responseBody, { status: 200, headers: { 'Content-Type': hp.contentType } })
         }
       }
 
-      // Record for auto-tuning
       autoTuner.record(pathname, rawBody.length, Object.keys(headersObj).length, 200)
 
       // ═══════════════════════════════════════════════════════════════════
       // LAYER 1: IP Reputation
       // ═══════════════════════════════════════════════════════════════════
-      const l1Start = Date.now()
+      const l1 = Date.now()
       layerTrace.push({ layer: 1, name: 'ip_reputation', result: 'pass', durationMs: 0 })
 
-      // Auto-ban check
       if (autoBan.isBanned(clientIp)) {
-        layerTrace[layerTrace.length - 1].result = 'block'
-        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l1Start
-        totalBlocked++
+        layerTrace[0].result = 'block'
+        layerTrace[0].durationMs = Date.now() - l1
+        _recordBlock('ip_banned')
         logger.info({ event: 'attack_blocked', clientIp, attackType: 'ip_banned', path: pathname, requestId, statusCode: 403, layerTrace })
         return jsonResponse(403, 'Forbidden', 'ip_banned')
       }
 
-      // Whitelist bypass
       if (ipWhitelist.length > 0 && isIpWhitelisted(clientIp, ipWhitelist)) {
-        const secHeaders = buildSecurityHeaders(config.securityHeaders, pathname)
-        return new Response(null, { status: 200, headers: secHeaders })
+        return new Response(null, { status: 200, headers: buildSecurityHeaders(config.securityHeaders, pathname) })
       }
 
-      // IP reputation check (async — non-blocking)
       const ipProfile = await runSafe(() => classifyIp(clientIp))
-
       if (ipProfile) {
-        // Block Tor exit nodes and known scanners immediately
         if (ipProfile.isTor) {
-          allSignals.push({
-            source: 'ip_reputation', weight: 0.15, score: 0.90,
-            attackType: 'bot_detected', attackCategory: 'bot',
-            detectedIn: 'ip', matchedPattern: 'tor_exit_node', confidence: 0.90, layer: 1,
-          })
+          allSignals.push({ source: 'ip_reputation', weight: 0.15, score: 0.90, attackType: 'bot_detected', attackCategory: 'bot', detectedIn: 'ip', matchedPattern: 'tor_exit_node', confidence: 0.90, layer: 1 })
         }
         if (ipProfile.isKnownScanner) {
-          allSignals.push({
-            source: 'ip_reputation', weight: 0.15, score: 0.85,
-            attackType: 'bot_detected', attackCategory: 'bot',
-            detectedIn: 'ip', matchedPattern: `known_scanner_asn:${ipProfile.asn}`, confidence: 0.85, layer: 1,
-          })
+          allSignals.push({ source: 'ip_reputation', weight: 0.15, score: 0.85, attackType: 'bot_detected', attackCategory: 'bot', detectedIn: 'ip', matchedPattern: `known_scanner_asn:${ipProfile.asn}`, confidence: 0.85, layer: 1 })
         }
-        // IP reputation trust score signal
         if (ipProfile.trustScore < 0.5) {
-          allSignals.push({
-            source: 'ip_reputation', weight: 0.15, score: 1.0 - ipProfile.trustScore,
-            attackType: 'ip_banned', attackCategory: 'bot',
-            detectedIn: 'ip', matchedPattern: `low_trust:${ipProfile.classification}`, confidence: 0.80, layer: 1,
-          })
+          allSignals.push({ source: 'ip_reputation', weight: 0.15, score: 1.0 - ipProfile.trustScore, attackType: 'ip_banned', attackCategory: 'bot', detectedIn: 'ip', matchedPattern: `low_trust:${ipProfile.classification}`, confidence: 0.80, layer: 1 })
         }
-        // Block IPs in custom reputation list
         if (ipReputation.length > 0 && ipMatchesList(clientIp, ipReputation)) {
           layerTrace[layerTrace.length - 1].result = 'block'
-          totalBlocked++
+          _recordBlock('ip_reputation')
           return jsonResponse(403, 'Forbidden', 'ip_reputation')
         }
       }
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l1Start
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l1
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 2: Connection & Rate Control
+      // LAYER 2: Rate Control
       // ═══════════════════════════════════════════════════════════════════
-      const l2Start = Date.now()
+      const l2 = Date.now()
       layerTrace.push({ layer: 2, name: 'rate_control', result: 'pass', durationMs: 0 })
 
-      // Emergency Shield
       if (emergencyShield.check(ipWhitelist.length > 0 && isIpWhitelisted(clientIp, ipWhitelist))) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2Start
-        totalBlocked++
+        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
+        _recordBlock('emergency_shield')
         return new Response(JSON.stringify({ error: 'Service Unavailable', reason: 'emergency_shield' }), {
           status: 503, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
         })
       }
 
-      // Rate limiting
-      const sensitivity = getPathSensitivity(pathname)
-      const baseline = autoTuner.getBaseline(pathname)
-      const ruleRateLimit = matchedRule?.rateLimit
-      const autoRateLimit = baseline
-        ? { maxRequests: baseline.hardRateLimit, windowMs: 60_000 }
-        : getDefaultRateLimit(sensitivity)
-      const rateLimitConfig = ruleRateLimit ?? autoRateLimit
+      const sensitivity    = getPathSensitivity(pathname)
+      const baseline       = autoTuner.getBaseline(pathname)
+      const rateLimitConfig = matchedRule?.rateLimit
+        ?? (baseline ? { maxRequests: baseline.hardRateLimit, windowMs: 60_000 } : getDefaultRateLimit(sensitivity))
 
       const rateResult = rateLimiter.check(clientIp, rateLimitConfig)
-      const rateLimitHeaders = rateLimiter.getHeaders(clientIp, rateLimitConfig)
-
       if (!rateResult.allowed) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2Start
-        totalBlocked++
-        logger.info({ event: 'rate_limited', clientIp, path: pathname, requestId, statusCode: 429, windowMs: rateLimitConfig.windowMs })
+        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
+        _recordBlock('rate_limited')
+        logger.info({ event: 'rate_limited', clientIp, path: pathname, requestId, statusCode: 429 })
         return new Response(JSON.stringify({ error: 'Too Many Requests' }), {
           status: 429, headers: {
             'Content-Type': 'application/json',
             'Retry-After': String(rateResult.retryAfter ?? 60),
-            ...rateLimitHeaders,
+            ...rateLimiter.getHeaders(clientIp, rateLimitConfig),
           },
         })
       }
-
-      if (rateResult.delay) {
-        await new Promise<void>(r => setTimeout(r, rateResult.delay!))
-      }
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2Start
+      if (rateResult.delay) await new Promise<void>(r => setTimeout(r, rateResult.delay!))
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 3: Protocol & Header Validation
+      // LAYER 3: Protocol Validation
       // ═══════════════════════════════════════════════════════════════════
-      const l3Start = Date.now()
+      const l3 = Date.now()
       layerTrace.push({ layer: 3, name: 'protocol_validation', result: 'pass', durationMs: 0 })
 
-      const totalHeaderSize = Object.entries(headersObj).reduce((acc, [k, v]) => acc + k.length + v.length, 0)
+      const totalHeaderSize = Object.entries(headersObj).reduce((a, [k, v]) => a + k.length + v.length, 0)
       if (totalHeaderSize > 16 * 1024) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        totalBlocked++
-        return new Response('Request Header Fields Too Large', { status: 431, headers: { 'Content-Type': 'text/plain' } })
+        _recordBlock('header_too_large')
+        return new Response('Request Header Fields Too Large', { status: 431 })
       }
-
       if (req.url.length > 8192) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        totalBlocked++
+        _recordBlock('uri_too_long')
         return jsonResponse(414, 'URI Too Long', 'uri_too_long')
       }
 
-      // Host header injection
       const hostSignal = await runSafe(() => detectHostHeaderInjection(headersObj))
       if (hostSignal) allSignals.push(hostSignal)
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l3Start
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l3
 
       // ═══════════════════════════════════════════════════════════════════
       // LAYER 4: Request Integrity
       // ═══════════════════════════════════════════════════════════════════
-      const l4Start = Date.now()
+      const l4 = Date.now()
       layerTrace.push({ layer: 4, name: 'request_integrity', result: 'pass', durationMs: 0 })
 
-      // Request smuggling
       const smuggling = await runSafe(() => detectRequestSmuggling(headersObj))
       if (smuggling) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4Start
-        return blockAndLog(clientIp, pathname, requestId, 400, smuggling, layerTrace, logger, autoBan, config, allSignals)
+        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
+        _recordBlock(smuggling.attackType)
+        return _blockAndLog(clientIp, pathname, requestId, 400, smuggling, layerTrace, logger, autoBan, config)
       }
 
-      // HTTP Parameter Pollution
       const hpp = await runSafe(() => detectHpp(url.search.slice(1), /form-urlencoded/i.test(contentType) ? rawBody : undefined))
       if (hpp) allSignals.push(hpp)
 
-      // Method override
       const methodOverride = await runSafe(() => detectMethodOverride(headersObj, query))
       if (methodOverride) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4Start
-        return blockAndLog(clientIp, pathname, requestId, 405, methodOverride, layerTrace, logger, autoBan, config, allSignals)
+        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
+        _recordBlock(methodOverride.attackType)
+        return _blockAndLog(clientIp, pathname, requestId, 405, methodOverride, layerTrace, logger, autoBan, config)
       }
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4Start
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 5: Payload & Injection Detection
+      // LAYER 5: Injection Detection (17 detectors in parallel)
       // ═══════════════════════════════════════════════════════════════════
-      const l5Start = Date.now()
+      const l5 = Date.now()
       layerTrace.push({ layer: 5, name: 'injection_detection', result: 'pass', durationMs: 0 })
 
-      const enabledDet = matchedRule?.detectors
+      const det = matchedRule?.detectors
+      const on  = (k: keyof NonNullable<typeof det>) => det ? det[k] !== false : true
 
-      const runDet = (name: keyof NonNullable<typeof enabledDet>) =>
-        enabledDet ? enabledDet[name] !== false : true
-
-      // Run all detectors in parallel with bulkhead isolation
-      const detectorResults = await Promise.all([
-        runDet('sqli')               ? runSafe(() => detectSqli(normalizedFields)) : null,
-        runDet('xss')                ? runSafe(() => detectXss(normalizedFields))  : null,
-        runDet('rce')                ? runSafe(() => detectRce(normalizedFields))  : null,
-        runDet('ssti')               ? runSafe(() => detectSsti(normalizedFields)) : null,
-        runDet('ldap')               ? runSafe(() => detectLdap(normalizedFields)) : null,
-        runDet('xpath')              ? runSafe(() => detectXpath(normalizedFields)): null,
-        runDet('nosql')              ? runSafe(() => detectNosql(normalizedFields)): null,
-        runDet('nosql') && parsedBody ? runSafe(() => detectNosqlInObject(parsedBody)) : null,
-        runDet('xxe')                ? runSafe(() => detectXxe(contentType, rawBody)) : null,
-        runDet('xxe')                ? runSafe(() => detectXxeInFields(normalizedFields)) : null,
-        runDet('ssrf')               ? runSafe(() => detectSsrf(normalizedFields)) : null,
-        runDet('pathTraversal')      ? runSafe(() => detectPathTraversal(normalizedFields)) : null,
-        runDet('crlf')               ? runSafe(() => detectCrlf(normalizedFields)) : null,
-        runDet('prototypePollution') ? runSafe(() => detectPrototypePollution(parsedBody, rawBody, contentType)) : null,
-        runDet('openRedirect')       ? runSafe(() => detectOpenRedirect(query, headersObj['host'] ?? '')) : null,
-        // CRLF in raw fields
-        runDet('crlf')               ? runSafe(() => detectCrlf({ ...headersObj })) : null,
+      const detResults = await Promise.all([
+        on('sqli')               ? runSafe(() => detectSqli(normalizedFields))               : null,
+        on('xss')                ? runSafe(() => detectXss(normalizedFields))                : null,
+        on('rce')                ? runSafe(() => detectRce(normalizedFields))                : null,
+        on('ssti')               ? runSafe(() => detectSsti(normalizedFields))               : null,
+        on('ldap')               ? runSafe(() => detectLdap(normalizedFields))               : null,
+        on('xpath')              ? runSafe(() => detectXpath(normalizedFields))              : null,
+        on('nosql')              ? runSafe(() => detectNosql(normalizedFields))              : null,
+        on('nosql') && parsedBody ? runSafe(() => detectNosqlInObject(parsedBody))           : null,
+        on('xxe')                ? runSafe(() => detectXxe(contentType, rawBody))            : null,
+        on('xxe')                ? runSafe(() => detectXxeInFields(normalizedFields))        : null,
+        on('ssrf')               ? runSafe(() => detectSsrf(normalizedFields))               : null,
+        on('pathTraversal')      ? runSafe(() => detectPathTraversal(normalizedFields))      : null,
+        on('crlf')               ? runSafe(() => detectCrlf(normalizedFields))               : null,
+        on('crlf')               ? runSafe(() => detectCrlf({ ...headersObj }))              : null,
+        on('prototypePollution') ? runSafe(() => detectPrototypePollution(parsedBody, rawBody, contentType)) : null,
+        on('openRedirect')       ? runSafe(() => detectOpenRedirect(query, headersObj['host'] ?? '')) : null,
       ])
+      for (const s of detResults) { if (s) allSignals.push(s) }
 
-      for (const signal of detectorResults) {
-        if (signal) allSignals.push(signal)
-      }
-
-      // Payload-level analysis (entropy, compression bomb, JSON depth)
       const payloadResult = await runSafe(() => analyzePayload(rawBody, contentType, contentEncoding, parsedBody))
       if (payloadResult) {
         if (payloadResult.blocked) {
           layerTrace[layerTrace.length - 1].result = 'block'
-          totalBlocked++
+          _recordBlock(payloadResult.blockReason ?? 'payload_error')
           return jsonResponse(payloadResult.blockStatus ?? 413, payloadResult.blockReason ?? 'payload_error', payloadResult.blockReason ?? 'payload_error')
         }
         allSignals.push(...payloadResult.signals)
       }
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l5Start
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l5
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 6: Behavioral & Intelligence Analysis
+      // LAYER 6: Behavioral Analysis
       // ═══════════════════════════════════════════════════════════════════
-      const l6Start = Date.now()
+      const l6 = Date.now()
       layerTrace.push({ layer: 6, name: 'behavioral_analysis', result: 'pass', durationMs: 0 })
 
-      // Temporary blocklist check
       if (behavioral.isTempBlocked(clientIp)) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        totalBlocked++
+        _recordBlock('behavioral_block')
         return jsonResponse(403, 'Forbidden', 'behavioral_block')
       }
 
-      // Bot detection (UA + header consistency)
-      if (runDet('botDetection')) {
+      if (on('botDetection')) {
         const ua = headersObj['user-agent'] ?? ''
-        const botSignal = await runSafe(() => detectBot(ua, config.heavyDefense?.ipReputation ?? []))
-        if (botSignal) allSignals.push(botSignal)
-
+        const botSignal       = await runSafe(() => detectBot(ua, config.heavyDefense?.ipReputation ?? []))
         const botHeaderSignal = await runSafe(() => detectBotByHeaders(headersObj))
+        if (botSignal)       allSignals.push(botSignal)
         if (botHeaderSignal) allSignals.push(botHeaderSignal)
       }
 
-      // TLS/JA3 fingerprint
       if (ipProfile?.honeypotTriggered === false) {
-        const ja3Signal = scoreTlsFingerprint(null)  // null = no JA3 available (reverse proxy)
+        const ja3Signal = scoreTlsFingerprint(null)
         if (ja3Signal) allSignals.push(ja3Signal)
       }
 
-      // Behavioral tracking
-      const behaviorProfile = await runSafe(() =>
-        behavioral.trackRequest(clientIp, pathname, undefined, rawBody.length)
-      )
+      const behaviorProfile = await runSafe(() => behavioral.trackRequest(clientIp, pathname, undefined, rawBody.length))
       if (behaviorProfile && behaviorProfile.anomalyScore > 0.5) {
         allSignals.push({
           source: 'behavioral', weight: 0.20, score: behaviorProfile.anomalyScore,
@@ -467,119 +421,89 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
         }
       }
 
-      // BOLA/IDOR check
-      if (runDet('bola')) {
-        const isBola = behavioral.checkBola(clientIp, pathname)
-        if (isBola) {
-          logger.warn({ event: 'bola_detected', clientIp, path: pathname, requestId })
-        }
+      if (on('bola') && behavioral.checkBola(clientIp, pathname)) {
+        logger.warn({ event: 'bola_detected', clientIp, path: pathname, requestId })
       }
-
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l6Start
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l6
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 7: Composite Scoring & Action Decision
+      // LAYER 7: Composite Scoring & Action
       // ═══════════════════════════════════════════════════════════════════
-      const l7Start = Date.now()
+      const l7 = Date.now()
       layerTrace.push({ layer: 7, name: 'composite_scoring', result: 'pass', durationMs: 0 })
-
       const composite = scoring.compute(allSignals)
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l7
 
-      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l7Start
-
-      // ── Action decision ──────────────────────────────────────────────
       if (composite.action === 'block' && !config.dryRun) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        totalBlocked++
-
         const primary = composite.primarySignal
+        _recordBlock(primary?.attackType)
+
         if (primary) {
           autoBan.recordViolation(clientIp, primary.attackType)
           logger.info({
-            event: 'attack_blocked',
-            clientIp,
-            method: req.method,
-            path: pathname,
-            requestId,
-            attackType: primary.attackType,
-            attackCategory: primary.attackCategory,
-            detectedIn: primary.detectedIn,
-            matchedPattern: primary.matchedPattern,
-            compositeScore: composite.score,
-            layerTrace,
-            statusCode: 403,
+            event: 'attack_blocked', clientIp, method: req.method, path: pathname, requestId,
+            attackType: primary.attackType, attackCategory: primary.attackCategory,
+            detectedIn: primary.detectedIn, matchedPattern: primary.matchedPattern,
+            compositeScore: composite.score, layerTrace, statusCode: 403,
           })
-        }
 
-        // Custom response handler
-        if (config.onBlocked && primary) {
-          const ctx = { requestId, url: req.url, method: req.method, clientIp, headers: headersObj, query, body: parsedBody, rawBody, normalizedFields, normalizationHistory: [], pathSensitivity: sensitivity, ipProfile: ipProfile ?? null, behaviorProfile: behaviorProfile ?? null, tlsFingerprint: null, arrivalTimestamp, contentType }
-          try {
-            const custom = config.onBlocked(ctx, primary)
-            if (custom instanceof Response) return custom
-            if (custom instanceof Promise) {
-              const resolved = await custom.catch(() => null)
-              if (resolved) return resolved
+          if (config.onBlocked) {
+            const ctx = {
+              requestId, url: req.url, method: req.method, clientIp,
+              headers: headersObj, query, body: parsedBody, rawBody,
+              normalizedFields, normalizationHistory: [],
+              pathSensitivity: sensitivity,
+              ipProfile: ipProfile ?? null, behaviorProfile: behaviorProfile ?? null,
+              tlsFingerprint: null, arrivalTimestamp, contentType,
             }
-          } catch { /* fall through to default */ }
+            try {
+              const custom = config.onBlocked(ctx, primary)
+              if (custom instanceof Response) return custom
+              if (custom instanceof Promise) {
+                const r = await custom.catch(() => null)
+                if (r) return r
+              }
+            } catch { /* fall through */ }
+          }
         }
 
-        return jsonResponse(403, 'Forbidden', composite.primarySignal?.attackType ?? 'attack_detected')
+        return jsonResponse(403, 'Forbidden', primary?.attackType ?? 'attack_detected')
       }
 
       if (composite.action === 'soft_block' && !config.dryRun) {
-        // Tarpit: apply progressive delay
         await tarpit.delay(clientIp)
         autoBan.recordViolation(clientIp, composite.primarySignal?.attackType ?? 'suspicious')
-        logger.info({
-          event: 'soft_block_tarpit',
-          clientIp, path: pathname, requestId,
-          compositeScore: composite.score,
-          countermeasureApplied: 'tarpit',
-        })
-        // Allow through after delay but with elevated monitoring
+        logger.info({ event: 'soft_block_tarpit', clientIp, path: pathname, requestId, compositeScore: composite.score })
       }
 
       if (composite.action === 'flag') {
-        logger.info({
-          event: 'request_flagged',
-          clientIp, path: pathname, requestId,
-          compositeScore: composite.score,
-          attackType: composite.primarySignal?.attackType,
-        })
-        behavioral.addToTempBlocklist(clientIp, 0)  // just mark for elevated monitoring
+        logger.info({ event: 'request_flagged', clientIp, path: pathname, requestId, compositeScore: composite.score, attackType: composite.primarySignal?.attackType })
+        behavioral.addToTempBlocklist(clientIp, 0)
       }
 
-      // dryRun: log but don't block
       if (config.dryRun && allSignals.length > 0) {
-        logger.info({
-          event: 'attack_detected_dryrun',
-          clientIp, path: pathname, requestId,
-          compositeScore: composite.score,
-          attackType: composite.primarySignal?.attackType,
-          dryRun: true,
-        })
+        logger.info({ event: 'attack_detected_dryrun', clientIp, path: pathname, requestId, compositeScore: composite.score, attackType: composite.primarySignal?.attackType, dryRun: true })
       }
 
-      // ── Pass through with security headers ─────────────────────────
-      return undefined  // Signal to adapter: request is allowed, inject headers
+      return undefined // allowed — adapter injects security headers
 
     } finally {
       emergencyShield.decrement()
     }
   }
 
-  // Build the FirewallInstance
+  // ─── Build FirewallInstance ───────────────────────────────────────────────
   const instance = handler as FirewallInstance
   instance.getBannedIPs = (): BannedIpEntry[] => autoBan.getBannedIPs()
-  instance.unbanIP = (ip: string): boolean => autoBan.unban(ip)
-  instance.getStats = (): FirewallStats => ({
+  instance.unbanIP      = (ip: string): boolean => autoBan.unban(ip)
+  instance.getStats     = (): FirewallStats => ({
     totalBlocked,
-    activeBans: autoBan.getBannedIPs().length,
+    activeBans:        autoBan.getBannedIPs().length,
     activeConnections: emergencyShield.getActiveConnections(),
-    uptime: Math.floor((Date.now() - startTime) / 1000),
-    operationalMode: watchdog.getMode() as OperationalMode,
-    moduleHealth: Object.fromEntries(
+    uptime:            Math.floor((Date.now() - startTime) / 1000),
+    operationalMode:   watchdog.getMode() as OperationalMode,
+    moduleHealth:      Object.fromEntries(
       Object.entries(watchdog.getModuleHealth()).map(([k, v]) => [k, v.status])
     ),
   })
@@ -587,34 +511,15 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   return instance
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function jsonResponse(status: number, error: string, reason: string): Response {
-  return new Response(JSON.stringify({ error, reason }), {
+// ─── Internal block helper ───────────────────────────────────────────────────
+function _blockAndLog(
+  clientIp: string, path: string, requestId: string, status: number,
+  signal: ThreatSignal, layerTrace: LayerTraceEntry[],
+  logger: Logger, autoBan: AutoBanManager, config: FirewallConfig,
+): Response {
+  logger.info({ event: 'attack_blocked', clientIp, path, requestId, attackType: signal.attackType, matchedPattern: signal.matchedPattern, layerTrace, statusCode: status })
+  if (!config.dryRun) autoBan.recordViolation(clientIp, signal.attackType)
+  return new Response(JSON.stringify({ error: status === 400 ? 'Bad Request' : status === 405 ? 'Method Not Allowed' : 'Forbidden', reason: signal.attackType }), {
     status, headers: { 'Content-Type': 'application/json' },
   })
-}
-
-function blockAndLog(
-  clientIp: string,
-  path: string,
-  requestId: string,
-  status: number,
-  signal: ThreatSignal,
-  layerTrace: LayerTraceEntry[],
-  logger: Logger,
-  autoBan: AutoBanManager,
-  config: FirewallConfig,
-  allSignals: ThreatSignal[],
-): Response {
-  logger.info({
-    event: 'attack_blocked',
-    clientIp, path, requestId,
-    attackType: signal.attackType,
-    matchedPattern: signal.matchedPattern,
-    layerTrace,
-    statusCode: status,
-  })
-  if (!config.dryRun) autoBan.recordViolation(clientIp, signal.attackType)
-  return jsonResponse(status, status === 400 ? 'Bad Request' : status === 405 ? 'Method Not Allowed' : 'Forbidden', signal.attackType)
 }

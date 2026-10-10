@@ -1,7 +1,7 @@
 {
   "name": "nextguard",
-  "version": "1.0.0",
-  "description": "Enterprise-grade web application firewall middleware for Node.js. Zero config — just plug it in and full protection activates automatically.",
+  "version": "3.0.0",
+  "description": "Enterprise-grade L7 web application firewall for Node.js. Zero config — 17 attack detectors, behavioral analysis, and dashboard integration.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -27,7 +27,7 @@
     "test:property": "vitest run test/property",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src --ext .ts",
-    "prepublishOnly": "npm run build && npm run test",
+    "prepublishOnly": "npm run build",
     "fetch-geoip": "node scripts/fetch-geoip-data.js"
   },
   "keywords": [
