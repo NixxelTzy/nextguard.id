@@ -1,17 +1,23 @@
 {
   "name": "@nextguard/nextguard",
-  "version": "3.1.0",
+  "version": "3.2.0",
   "description": "Enterprise-grade L7 web application firewall for Node.js. Zero config — 17 attack detectors, behavioral analysis, and dashboard integration.",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "edge-light": "./dist/index.mjs",
-      "worker": "./dist/index.mjs",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./edge": {
+      "edge-light": "./dist/edge.mjs",
+      "worker": "./dist/edge.mjs",
+      "browser": "./dist/edge.mjs",
+      "import": "./dist/edge.mjs",
+      "require": "./dist/edge.js",
+      "types": "./dist/edge.d.ts"
     },
     "./middleware": {
       "edge-light": "./dist/adapters/nextjs.mjs",

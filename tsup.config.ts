@@ -1,7 +1,17 @@
 import { defineConfig } from 'tsup'
 
+// Node.js built-ins to mark as external for Edge builds
+const NODE_BUILTINS = [
+  'node:crypto', 'node:fs', 'node:net', 'node:path', 'node:module',
+  'node:os', 'node:stream', 'node:buffer', 'node:zlib', 'node:util',
+  'node:http', 'node:https', 'node:tls', 'node:events', 'node:url',
+  'crypto', 'fs', 'net', 'path', 'os', 'stream', 'buffer', 'zlib',
+  'util', 'http', 'https', 'tls', 'events', 'url',
+  '@maxmind/geoip2-node', 'jschardet',
+]
+
 export default defineConfig([
-  // ── Node.js build (core + Express + Fastify) ────────────────────────────────
+  // ── Node.js build — core + Express + Fastify ────────────────────────────────
   {
     entry: {
       index: 'src/index.ts',
@@ -22,11 +32,13 @@ export default defineConfig([
       options.conditions = ['node']
     },
   },
-  // ── Edge / Browser build (Next.js adapter) ─────────────────────────────────
-  // This bundle is Edge Runtime compatible — no Node.js built-ins
+
+  // ── Edge build — Next.js adapter + edge firewall ────────────────────────────
+  // 100% Web API only — safe for Vercel Edge Runtime / Cloudflare Workers
   {
     entry: {
       'adapters/nextjs': 'src/adapters/nextjs.ts',
+      edge: 'src/edge.ts',
     },
     format: ['esm', 'cjs'],
     dts: true,
@@ -40,18 +52,7 @@ export default defineConfig([
     outDir: 'dist',
     esbuildOptions(options) {
       options.conditions = ['browser', 'edge-light', 'worker']
-      // Mark all Node.js built-ins as external — they'll be polyfilled or skipped
-      const nodeBuiltins = [
-        'node:crypto', 'node:fs', 'node:net', 'node:path',
-        'node:module', 'node:os', 'node:stream', 'node:buffer',
-        'node:zlib', 'node:util',
-        'crypto', 'fs', 'net', 'path', 'os', 'stream', 'buffer', 'zlib', 'util',
-        '@maxmind/geoip2-node', 'jschardet',
-      ]
-      options.external = [
-        ...((options.external as string[]) ?? []),
-        ...nodeBuiltins,
-      ]
+      options.external = [...(options.external as string[] ?? []), ...NODE_BUILTINS]
     },
   },
 ])
