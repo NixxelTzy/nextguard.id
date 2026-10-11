@@ -78,7 +78,7 @@ function jsonResponse(status: number, error: string, reason: string): Response {
 }
 
 export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
-  const scoring    = new CompositeScoringEngine()
+  const scoring    = new CompositeScoringEngine(undefined, config.strictMode ?? false)
   const rateLimiter = new RateLimiter()
   const autoBan    = new AutoBanManager(config.autoBan)
   const behavioral = new BehavioralTracker()

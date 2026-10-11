@@ -15,13 +15,13 @@ export interface SignalWeights {
 }
 
 export const DEFAULT_WEIGHTS: SignalWeights = {
-  signature:       0.35,
-  behavioral:      0.20,
-  ip_reputation:   0.15,
-  protocol_anomaly: 0.15,
-  tls_fingerprint: 0.10,
-  payload_entropy: 0.05,
-  timing:          0.00,
+  signature:        0.55,  // WAF detectors — main blocking signal
+  behavioral:       0.20,
+  ip_reputation:    0.15,
+  protocol_anomaly: 0.10,
+  tls_fingerprint:  0.10,
+  payload_entropy:  0.05,
+  timing:           0.00,
 }
 
 export interface WeightObservation {

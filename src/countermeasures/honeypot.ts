@@ -58,11 +58,16 @@ export class HoneypotSystem {
   }
 
   isHoneypotPath(pathname: string): boolean {
-    return this.paths.has(pathname)
+    if (this.paths.has(pathname)) return true
+    // Also match with trailing slash or query params stripped
+    const normalized = pathname.split('?')[0].replace(/\/$/, '') || '/'
+    if (normalized !== pathname && this.paths.has(normalized)) return true
+    return false
   }
 
   getHoneypotResponse(pathname: string): HoneypotMatch | null {
     const factory = this.paths.get(pathname)
+      ?? this.paths.get(pathname.split('?')[0].replace(/\/$/, '') || '/')
     if (!factory) return null
     const { body, contentType } = factory()
     return { matched: true, path: pathname, responseBody: body, contentType }

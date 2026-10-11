@@ -463,6 +463,8 @@ export interface FirewallConfig {
   onBlocked?: OnBlockedCallback
   /** Called on every block event — use for Telegram alerts, logging, etc. */
   onBlockEvent?: OnBlockEventCallback
+  /** Strict mode — lower thresholds, block on first sign of attack */
+  strictMode?: boolean
   ipWhitelist?: string[]
   geoBlocking?: GeoBlockingConfig
   honeypot?: HoneypotConfig

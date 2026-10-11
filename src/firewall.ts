@@ -86,7 +86,7 @@ function jsonResponse(status: number, error: string, reason: string): Response {
 // ─── Factory ──────────────────────────────────────────────────────────────────
 export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const logger    = new Logger(config.logging ?? 'info', config.customLogger)
-  const scoring   = new CompositeScoringEngine()
+  const scoring   = new CompositeScoringEngine(undefined, config.strictMode ?? false)
   const rateLimiter   = new RateLimiter()
   const emergencyShield = new EmergencyShield(config.heavyDefense?.globalConcurrentLimit ?? 10_000)
   const autoBan   = new AutoBanManager(config.autoBan)
