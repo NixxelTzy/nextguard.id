@@ -1,3 +1,4 @@
+
 /**
  * NextGuard — Edge Runtime Firewall
  *
@@ -295,6 +296,15 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       _recordBlock(primary?.attackType)
       if (primary) autoBan.recordViolation(clientIp, primary.attackType)
 
+      // Fire onBlockEvent — use for Telegram alerts, database logging, etc.
+      if (config.onBlockEvent) {
+        Promise.resolve(config.onBlockEvent({
+          ip: clientIp, attackType: primary?.attackType ?? 'attack_detected',
+          path: pathname, method: req.method, requestId,
+          compositeScore: composite.score, timestamp: Date.now(),
+        })).catch(() => {})
+      }
+
       if (config.onBlocked && primary) {
         const ctx = { requestId, url: req.url, method: req.method, clientIp, headers: headersObj, query, body: parsedBody, rawBody, normalizedFields, normalizationHistory: [], pathSensitivity: sensitivity, ipProfile: null, behaviorProfile: behaviorProfile ?? null, tlsFingerprint: null, arrivalTimestamp, contentType }
         try {
@@ -317,6 +327,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const instance = handler as FirewallInstance
   instance.getBannedIPs = (): BannedIpEntry[] => autoBan.getBannedIPs()
   instance.unbanIP      = (ip: string): boolean => autoBan.unban(ip)
+  instance.banIP        = (ip: string, reason = 'manual', durationMs?: number): void => autoBan.ban(ip, reason, durationMs)
   instance.getStats     = (): FirewallStats => ({
     totalBlocked,
     activeBans:        autoBan.getBannedIPs().length,

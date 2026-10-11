@@ -435,6 +435,17 @@ export type OnBlockedCallback = (
   signal: ThreatSignal,
 ) => Response | Promise<Response>
 
+/** Called every time a request is blocked — use for logging, alerts, etc. */
+export type OnBlockEventCallback = (event: {
+  ip: string
+  attackType: string
+  path: string
+  method: string
+  requestId: string
+  compositeScore: number
+  timestamp: number
+}) => void | Promise<void>
+
 export interface FirewallConfig {
   rules?: RuleConfig[]
   /** Security profile preset — overrides individual thresholds */
@@ -450,6 +461,8 @@ export interface FirewallConfig {
   customLogger?: (event: LogEvent) => void
   dryRun?: boolean
   onBlocked?: OnBlockedCallback
+  /** Called on every block event — use for Telegram alerts, logging, etc. */
+  onBlockEvent?: OnBlockEventCallback
   ipWhitelist?: string[]
   geoBlocking?: GeoBlockingConfig
   honeypot?: HoneypotConfig
@@ -490,6 +503,7 @@ export interface FirewallInstance {
   (req: Request): Promise<Response | undefined>
   getBannedIPs(): BannedIpEntry[]
   unbanIP(ip: string): boolean
+  banIP(ip: string, reason?: string, durationMs?: number): void
   getStats(): FirewallStats
 }
 

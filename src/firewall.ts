@@ -458,6 +458,15 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
             compositeScore: composite.score, layerTrace, statusCode: 403,
           })
 
+          // Fire onBlockEvent — use for Telegram alerts, DB logging, etc.
+          if (config.onBlockEvent) {
+            Promise.resolve(config.onBlockEvent({
+              ip: clientIp, attackType: primary.attackType,
+              path: pathname, method: req.method, requestId,
+              compositeScore: composite.score, timestamp: Date.now(),
+            })).catch(() => {})
+          }
+
           if (config.onBlocked) {
             const ctx = {
               requestId, url: req.url, method: req.method, clientIp,
@@ -507,6 +516,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const instance = handler as FirewallInstance
   instance.getBannedIPs = (): BannedIpEntry[] => autoBan.getBannedIPs()
   instance.unbanIP      = (ip: string): boolean => autoBan.unban(ip)
+  instance.banIP        = (ip: string, reason = 'manual', durationMs?: number): void => autoBan.ban(ip, reason, durationMs)
   instance.getStats     = (): FirewallStats => ({
     totalBlocked,
     activeBans:        autoBan.getBannedIPs().length,

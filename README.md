@@ -364,7 +364,148 @@ await fastify.listen({ port: 3000 })
 
 ---
 
-## The 7-Layer Defense System
+## Advanced Usage
+
+### onBlockEvent — Telegram Alerts & Attack Logging
+
+```ts
+import { createFirewall } from '@nextguard/nextguard'
+
+export const firewall = createFirewall({
+  logging: 'warn',
+  rateLimit: { maxRequests: 30, windowMs: 5_000 },
+  autoBan: { threshold: 3, banDurationMs: 3_600_000 },
+
+  // Called on every blocked request — never slows down the main response
+  onBlockEvent: async ({ ip, attackType, path, method, compositeScore, timestamp }) => {
+    // 1. Send Telegram alert
+    await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: process.env.TELEGRAM_CHAT_ID,
+        text: `🛡️ Attack blocked!\nIP: ${ip}\nType: ${attackType}\nPath: ${path}\nScore: ${compositeScore.toFixed(2)}`,
+      }),
+    }).catch(() => {})
+
+    // 2. Log to Redis / database
+    // await redis.lpush('ng:attack_log', JSON.stringify({ ip, attackType, path, timestamp }))
+  },
+
+  // Customize the block response body
+  onBlocked: (ctx, signal) => {
+    return new Response(JSON.stringify({
+      error: 'Blocked by security policy',
+      requestId: ctx.requestId,
+    }), { status: 403, headers: { 'Content-Type': 'application/json' } })
+  },
+})
+```
+
+### Manual IP Ban (persistent across requests, in-memory)
+
+```ts
+// Ban an IP manually (e.g. from admin panel)
+firewall.banIP('1.2.3.4', 'manual_ban', 24 * 60 * 60_000) // 24 hour ban
+
+// List all currently banned IPs
+const banned = firewall.getBannedIPs()
+// [{ ip: '1.2.3.4', reason: 'manual_ban', expiresAt: 1728003600000 }]
+
+// Unban an IP
+firewall.unbanIP('1.2.3.4')
+```
+
+> **Note:** `banIP()` is in-memory only. For persistent bans across Vercel instances, store the ban in Redis and check it before calling `firewall(req)`.
+
+### IP Whitelist (skip all checks)
+
+```ts
+export const firewall = createFirewall({
+  ipWhitelist: [
+    '127.0.0.1',
+    '::1',
+    '10.0.0.0/8',       // your office CIDR
+    '203.0.113.0',      // your admin IP
+  ],
+})
+```
+
+### Why DoS GET requests aren't blocked
+
+Plain GET requests with no attack payloads are counted by the rate limiter. If they come from different Vercel instances, the in-memory counter resets. For cross-instance blocking:
+
+1. Implement Redis rate limiting in `middleware.ts` with Upstash (edge-compatible)
+2. Use `nextguard/edge` for attack detection in middleware
+
+```ts
+// middleware.ts — Edge Runtime compatible DoS protection
+import { NextRequest, NextResponse } from 'next/server'
+import { createFirewall } from '@nextguard/nextguard/edge'
+
+const firewall = createFirewall({
+  rateLimit: { maxRequests: 30, windowMs: 5_000 },
+  autoBan: { threshold: 3, banDurationMs: 3_600_000 },
+  onBlockEvent: async ({ ip, attackType }) => {
+    // Persist ban to Upstash Redis so other instances see it
+    await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/set/ng:ban:${ip}/1/ex/3600`, {
+      headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
+    }).catch(() => {})
+  },
+})
+
+export async function middleware(req: NextRequest) {
+  // Check Redis ban list first (shared across instances)
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0] ?? '0.0.0.0'
+  const banned = await fetch(`${process.env.UPSTASH_REDIS_REST_URL}/get/ng:ban:${ip}`, {
+    headers: { Authorization: `Bearer ${process.env.UPSTASH_REDIS_REST_TOKEN}` },
+  }).then(r => r.json()).then(d => d.result).catch(() => null)
+
+  if (banned) return new Response('Forbidden', { status: 403 })
+
+  // Run NextGuard WAF (17 detectors)
+  const result = await firewall(req as unknown as Request)
+  if (result) return result
+
+  return NextResponse.next()
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+}
+```
+
+### What triggers blocking — test payloads
+
+```bash
+# SQLi — always triggers (score 0.95+)
+curl -X POST https://your-app.vercel.app/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin'\'' OR 1=1--","password":"x"}'
+
+# XSS — always triggers
+curl "https://your-app.vercel.app/api/search?q=<script>alert(1)</script>"
+
+# Path traversal — always triggers  
+curl "https://your-app.vercel.app/api/file?path=../../../etc/passwd"
+
+# Bot detection — python-requests and curl with no Accept header flagged
+curl -A "python-requests/2.31.0" https://your-app.vercel.app/api/health
+
+# Rate limit — 31+ requests in 5 seconds from same IP returns 429
+for i in $(seq 1 35); do curl -s -o /dev/null -w "%{http_code}\n" https://your-app.vercel.app/api/health; done
+```
+
+### autoBan threshold explained
+
+`autoBan.threshold: 5` means **5 attack detections** within a 10-minute window from the same IP triggers a ban. It's not requests-per-second — it's blocked attack attempts.
+
+For DoS (plain GET flood with no attack payload), use `rateLimit` instead:
+```ts
+rateLimit: { maxRequests: 30, windowMs: 5_000 }  // 30 req/5s → 429
+```
+
+---
 
 Every request passes through 7 layers before reaching your app:
 
