@@ -1,5 +1,5 @@
 {
-  "name": "@kyuraz/nextguard",
+  "name": "nextguard-waf",
   "version": "4.0.0",
   "description": "Enterprise-grade L7 web application firewall for Node.js. Zero config — 17 attack detectors, behavioral analysis, and dashboard integration.",
   "main": "./dist/index.js",
