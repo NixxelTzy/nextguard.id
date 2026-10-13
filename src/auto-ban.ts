@@ -49,6 +49,21 @@ export class AutoBanManager {
     return true
   }
 
+  async isBannedWithRedis(
+    ip: string,
+    redisState?: { isBanned: (ip: string) => Promise<boolean>; available: boolean },
+  ): Promise<boolean> {
+    // Check local memory first (fastest)
+    if (this.isBanned(ip)) return true
+    // Check Redis if available (catches bans from other instances)
+    if (redisState?.available) {
+      try {
+        return await redisState.isBanned(ip)
+      } catch { /* fail open */ }
+    }
+    return false
+  }
+
   /**
    * Record a violation for an IP.
    * Returns true if the IP was just banned (threshold crossed).
@@ -96,8 +111,32 @@ export class AutoBanManager {
     })
   }
 
+  banWithRedis(
+    ip: string,
+    reason: string,
+    durationMs?: number,
+    redisState?: { setBan: (ip: string, reason: string, secs: number) => Promise<void>; available: boolean },
+  ): void {
+    this.ban(ip, reason, durationMs)
+    if (redisState?.available) {
+      const duration = durationMs ?? this.config.banDuration * 1000
+      redisState.setBan(ip, reason, Math.ceil(duration / 1000)).catch(() => { /* fire and forget */ })
+    }
+  }
+
   unban(ip: string): boolean {
     return this.bans.delete(ip)
+  }
+
+  async unbanWithRedis(
+    ip: string,
+    redisState?: { removeBan: (ip: string) => Promise<void>; available: boolean },
+  ): Promise<boolean> {
+    const local = this.unban(ip)
+    if (redisState?.available) {
+      redisState.removeBan(ip).catch(() => { /* fire and forget */ })
+    }
+    return local
   }
 
   getBannedIPs(): BannedIpEntry[] {

@@ -190,46 +190,49 @@ export function unicodeEscapeDecode(input: string): string {
 // ─── Pass 5: Base64 Decode ────────────────────────────────────────────────────
 /**
  * Detects and decodes base64-encoded tokens within the string.
- * Only decodes tokens that look like valid base64 (charset + length % 4 === 0)
- * and produce printable ASCII output (to avoid false positives on random strings).
+ * Uses Web Crypto API (atob) — 100% Edge Runtime compatible.
+ * Only decodes tokens that produce printable ASCII output (to avoid false positives).
  */
-const BASE64_CHARSET = /^[A-Za-z0-9+/]+=*$/
+
+function webSafeAtob(b64: string): string | null {
+  try {
+    if (typeof atob === 'function') {
+      return atob(b64)
+    }
+    // Node.js fallback via Buffer (only in Node, not Edge)
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.from(b64, 'base64').toString('utf8')
+    }
+    return null
+  } catch {
+    return null
+  }
+}
 
 export function base64Decode(input: string): string {
   if (!input) return input
 
   // Try to find base64-looking substrings and decode them
-  // We look for tokens of 8+ characters that match base64 charset
   return input.replace(/[A-Za-z0-9+/]{8,}={0,2}/g, (token) => {
-    // Must match charset and be properly padded length
-    if (!BASE64_CHARSET.test(token)) return token
-    if (token.length % 4 !== 0) {
-      // Try padding it
-      const padded = token + '='.repeat((4 - (token.length % 4)) % 4)
-      if (padded.length % 4 !== 0) return token
-      try {
-        const decoded = Buffer.from(padded, 'base64').toString('utf8')
-        // Only replace if decoded is mostly printable ASCII
-        const printable = decoded.split('').filter(c => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) < 0x7f).length
-        if (printable / decoded.length > 0.8 && decoded.length < token.length) {
-          return decoded
-        }
-        return token
-      } catch {
-        return token
-      }
+    // Must be properly padded — pad if needed
+    let padded = token
+    if (padded.length % 4 !== 0) {
+      padded = padded + '='.repeat((4 - (padded.length % 4)) % 4)
     }
-    try {
-      const decoded = Buffer.from(token, 'base64').toString('utf8')
-      // Only replace if decoded is mostly printable ASCII and shorter
-      const printable = decoded.split('').filter(c => c.charCodeAt(0) >= 0x20 && c.charCodeAt(0) < 0x7f).length
-      if (printable / decoded.length > 0.8 && decoded.length < token.length) {
-        return decoded
-      }
-      return token
-    } catch {
-      return token
+
+    const decoded = webSafeAtob(padded)
+    if (!decoded) return token
+
+    // Only replace if decoded is mostly printable ASCII and shorter than original
+    let printable = 0
+    for (let i = 0; i < decoded.length; i++) {
+      const code = decoded.charCodeAt(i)
+      if (code >= 0x20 && code < 0x7f) printable++
     }
+    if (decoded.length > 0 && printable / decoded.length > 0.8 && decoded.length < token.length) {
+      return decoded
+    }
+    return token
   })
 }
 
@@ -239,7 +242,22 @@ export function base64Decode(input: string): string {
  *   0x41 → A
  *   0x53454c454354 → SELECT
  *   \x41 → A (catch any missed by unicode pass — e.g. literal backslash-x in source)
+ *
+ * Uses pure JS hex parsing — no Buffer required. Edge Runtime compatible.
  */
+function hexToString(hex: string): string | null {
+  if (hex.length % 2 !== 0) return null
+  let result = ''
+  let allPrintable = true
+  for (let i = 0; i < hex.length; i += 2) {
+    const code = parseInt(hex.slice(i, i + 2), 16)
+    if (code === 0) continue  // skip null bytes
+    if (code < 0x20 || code >= 0x7f) allPrintable = false
+    result += String.fromCharCode(code)
+  }
+  return allPrintable && result.length > 0 ? result : null
+}
+
 export function hexEncodedDecode(input: string): string {
   if (!input) return input
 
@@ -247,23 +265,11 @@ export function hexEncodedDecode(input: string): string {
 
   // 0xXX…XX byte sequences (must be even-length hex digits)
   result = result.replace(/0x([0-9A-Fa-f]{2,})/g, (match, hex) => {
-    if (hex.length % 2 !== 0) return match
-    try {
-      const decoded = Buffer.from(hex, 'hex').toString('utf8')
-      // Only substitute if decoded is printable ASCII
-      const printable = decoded.split('').filter(c => {
-        const code = c.charCodeAt(0)
-        return code >= 0x20 && code < 0x7f
-      }).length
-      if (decoded.length > 0 && printable / decoded.length > 0.8) return decoded
-      return match
-    } catch {
-      return match
-    }
+    const decoded = hexToString(hex)
+    return decoded ?? match
   })
 
   // \xXX sequences — handles any literal \x that wasn't caught by pass 4
-  // (e.g. double-escaped \\x41 which became \x41 after prior pass)
   result = result.replace(/\\x([0-9A-Fa-f]{2})/g, (_, hex) => {
     const n = parseInt(hex, 16)
     if (n === 0) return ''
@@ -282,23 +288,30 @@ export const hexStringDecode = hexEncodedDecode
  *   +ADw- → <
  *   +ADw-script+AD4- → <script>
  *   +AFs- → [
+ *
+ * Uses pure JS / atob — Edge Runtime compatible.
  */
+function base64ToUtf16be(b64: string): string {
+  const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4)
+  const binary = webSafeAtob(padded)
+  if (!binary) return ''
+
+  const chars: string[] = []
+  for (let i = 0; i < binary.length - 1; i += 2) {
+    const code = (binary.charCodeAt(i) << 8) | binary.charCodeAt(i + 1)
+    if (code === 0) continue
+    chars.push(String.fromCharCode(code))
+  }
+  return chars.join('')
+}
+
 export function utf7Decode(input: string): string {
   if (!input || !input.includes('+')) return input
 
   return input.replace(/\+([A-Za-z0-9+/]*)-/g, (match, b64) => {
     if (!b64) return '+'  // bare +- means literal +
     try {
-      // UTF-7 uses modified base64 for Unicode chars
-      const bytes = Buffer.from(b64, 'base64')
-      // UTF-7 encodes as UTF-16BE
-      const chars: string[] = []
-      for (let i = 0; i < bytes.length - 1; i += 2) {
-        const code = (bytes[i]! << 8) | bytes[i + 1]!
-        if (code === 0) continue
-        chars.push(String.fromCharCode(code))
-      }
-      const decoded = chars.join('')
+      const decoded = base64ToUtf16be(b64)
       if (decoded.length > 0) return decoded
       return match
     } catch {

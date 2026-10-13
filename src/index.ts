@@ -97,4 +97,12 @@ export { ReputationEngine } from './reputation.js'
 
 // ─── Distributed Redis state ──────────────────────────────────────────────────
 export { getRedisState, RedisState } from './redis-state.js'
-export type { RedisStateConfig } from './redis-state.js'
+export type { RedisStateConfig, DistributedRateLimitResult } from './redis-state.js'
+
+// ─── Admin routes for Next.js App Router ──────────────────────────────────────
+export { createNextGuardRoutes } from './admin-routes.js'
+export type { AdminRoutesConfig } from './admin-routes.js'
+
+// ─── Built-in Telegram alerts ──────────────────────────────────────────────────
+export { TelegramAlerter } from './telegram.js'
+export type { TelegramConfig, TelegramAlertEvent } from './telegram.js'

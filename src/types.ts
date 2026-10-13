@@ -476,6 +476,15 @@ export interface FirewallConfig {
     token?: string
     namespace?: string
   }
+  /** Persistent store config (Upstash Redis or in-memory) */
+  store?: {
+    type?: 'redis' | 'memory'
+    url?: string
+    token?: string
+    namespace?: string
+  }
+  /** Built-in Telegram alerts for blocked requests */
+  telegram?: import('./telegram.js').TelegramConfig
   /** Health/metrics endpoint paths (set to false to disable) */
   healthPath?: string | false   // default: '/health'
   readyPath?: string | false    // default: '/ready'
@@ -507,6 +516,8 @@ export interface FirewallInstance {
   unbanIP(ip: string): boolean
   banIP(ip: string, reason?: string, durationMs?: number): void
   getStats(): FirewallStats
+  /** Event hook system for custom integrations (e.g. firewall.on('block', fn)) */
+  on(event: 'block' | 'attack', listener: (event: any) => void): FirewallInstance
 }
 
 // ── Backward Compatibility ────────────────────────────────────────────────────

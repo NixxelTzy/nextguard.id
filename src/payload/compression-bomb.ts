@@ -61,19 +61,26 @@ async function decompressWithZlib(
   data: Buffer,
   encoding: string,
 ): Promise<Buffer | null> {
+  // If running in Edge Runtime or browser, skip Node.js zlib entirely
+  if (typeof process === 'undefined' || (process.env && process.env.NEXT_RUNTIME === 'edge')) {
+    return null
+  }
+
   try {
-    // Dynamic import — will fail gracefully in Edge Runtime
-    const zlib = await import('node:zlib').catch(() => null)
+    // Dynamic loading via Function to prevent webpack/Next.js Edge bundler from tracing node:zlib statically
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const dynamicImport = new Function('m', 'return import(m)')
+    const zlib = await dynamicImport('node:' + 'zlib').catch(() => null)
     if (!zlib) return null
-    const { promisify } = await import('node:util').catch(() => ({ promisify: null }))
-    if (!promisify) return null
+    const util = await dynamicImport('node:' + 'util').catch(() => null)
+    if (!util?.promisify) return null
 
     if (encoding.includes('gzip')) {
-      return await (promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.gunzip)(data)
+      return await (util.promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.gunzip)(data)
     } else if (encoding.includes('deflate')) {
-      return await (promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.inflate)(data)
+      return await (util.promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.inflate)(data)
     } else if (encoding.includes('br')) {
-      return await (promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.brotliDecompress)(data)
+      return await (util.promisify as (fn: Function) => (b: Buffer) => Promise<Buffer>)(zlib.brotliDecompress)(data)
     }
     return null
   } catch {

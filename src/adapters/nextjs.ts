@@ -4,15 +4,14 @@
  * Compatible with Next.js 13+ middleware.ts (Edge Runtime + Node.js Runtime).
  * Zero-config: export { nextguard as middleware } from '@nextguard/nextguard'
  *
- * Edge Runtime compatible — no require(), no Node.js built-ins.
+ * Edge Runtime compatible — detects runtime and uses appropriate firewall.
  */
 
-import { createFirewall } from '../firewall.js'
+import { createFirewall } from '../firewall-edge.js'
 import { buildSecurityHeaders } from '../security-headers.js'
 import type { FirewallConfig } from '../types.js'
 
 // Edge Runtime compatible: NextResponse is available globally in Next.js middleware
-// We reference it through globalThis to avoid static analysis issues with webpack/Edge bundler
 declare const NextResponse: {
   next: (init?: ResponseInit) => Response & { headers: { set(k: string, v: string): void; delete(k: string): void } }
   redirect: (url: URL | string, status?: number) => Response
@@ -22,9 +21,11 @@ declare const NextResponse: {
 
 type NextMiddlewareFn = (req: Request) => Promise<Response | undefined>
 
-const isEdge = () =>
-  typeof process === 'undefined' ||
+const isEdgeRuntime = () =>
+  typeof EdgeRuntime !== 'undefined' ||
   (typeof process !== 'undefined' && process.env.NEXT_RUNTIME === 'edge')
+
+declare const EdgeRuntime: string | undefined
 
 /**
  * Create a Next.js middleware function with optional config.
@@ -39,6 +40,7 @@ export function nextguard(config: FirewallConfig = {}): NextMiddlewareFn {
   const firewall = createFirewall(config)
 
   return async function nextguardMiddleware(req: Request): Promise<Response | undefined> {
+
     // Reconstruct a standard Request — handles both Next.js Request and standard Request
     let request: Request
     try {
@@ -60,12 +62,17 @@ export function nextguard(config: FirewallConfig = {}): NextMiddlewareFn {
 
     if (result !== undefined) {
       // Blocked — return the block response directly
-      // Edge Runtime: 444 is used for force-close simulation
-      if (isEdge() && result.headers?.get?.('x-nextguard-force-terminate')) {
+      if (isEdgeRuntime() && result.headers?.get?.('x-nextguard-force-terminate')) {
         return new Response(null, { status: 444 })
       }
       const secHeaders = buildSecurityHeaders(config.securityHeaders)
-      return new Response(await result.text(), {
+      let body: string
+      try {
+        body = await result.clone().text()
+      } catch {
+        body = JSON.stringify({ error: 'Forbidden', reason: 'attack_detected' })
+      }
+      return new Response(body, {
         status: result.status,
         headers: { 'Content-Type': 'application/json', ...secHeaders },
       })
@@ -76,7 +83,6 @@ export function nextguard(config: FirewallConfig = {}): NextMiddlewareFn {
     const secHeaders = buildSecurityHeaders(config.securityHeaders, url.pathname)
 
     // Use NextResponse.next() to pass through with headers
-    // This works in both Edge and Node.js Next.js runtimes
     const NR = (globalThis as Record<string, unknown>)['NextResponse'] as typeof NextResponse | undefined
     if (NR?.next) {
       const nextResponse = NR.next()

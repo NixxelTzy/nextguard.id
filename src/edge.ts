@@ -14,7 +14,7 @@
  */
 
 export { nextguard, middleware } from './adapters/nextjs.js'
-export { createFirewall } from './firewall-edge.js'
+export { createFirewall, createFirewall as createEdgeFirewall } from './firewall-edge.js'
 export type {
   FirewallConfig,
   FirewallInstance,

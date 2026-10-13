@@ -60,6 +60,8 @@ import { HoneypotSystem } from './countermeasures/honeypot.js'
 import { TarpitManager } from './countermeasures/tarpit.js'
 import { scoreTlsFingerprint } from './tls/ja3.js'
 import { RecoveryWatchdog } from './recovery/watchdog.js'
+import { getRedisState } from './redis-state.js'
+import { TelegramAlerter } from './telegram.js'
 
 import type {
   FirewallConfig,
@@ -97,6 +99,18 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const watchdog  = new RecoveryWatchdog(5_000, {
     info: (e: object) => logger.info(e as Omit<LogEvent, 'timestamp'>),
   })
+
+  // Distributed Redis state (for Vercel serverless persistence)
+  const redisConfig = config.store?.type === 'redis'
+    ? { url: config.store.url, token: config.store.token, namespace: config.store.namespace }
+    : (config.redis ?? (config.store ? { url: config.store.url, token: config.store.token, namespace: config.store.namespace } : undefined))
+  const redisState = getRedisState(redisConfig)
+
+  // Built-in Telegram alerts
+  const telegramAlerter = config.telegram ? new TelegramAlerter(config.telegram) : null
+
+  // Event hook listeners
+  const listeners: Record<string, ((event: any) => void)[]> = { block: [], attack: [] }
 
   const ipReputation = config.heavyDefense?.ipReputation ?? []
   const ipWhitelist  = config.ipWhitelist ?? []
@@ -220,7 +234,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
         const hp = honeypot.getHoneypotResponse(pathname)
         if (hp) {
           updateIpProfile(clientIp, { honeypotTriggered: true })
-          autoBan.ban(clientIp, 'honeypot_triggered', 24 * 60 * 60_000)
+          autoBan.banWithRedis(clientIp, 'honeypot_triggered', 24 * 60 * 60_000, redisState)
           logger.info({ event: 'honeypot_triggered', clientIp, path: pathname, requestId })
           _recordBlock('honeypot_triggered')
           const delay = config.honeypot?.responseDelay ?? (10_000 + Math.random() * 20_000)
@@ -237,7 +251,8 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       const l1 = Date.now()
       layerTrace.push({ layer: 1, name: 'ip_reputation', result: 'pass', durationMs: 0 })
 
-      if (autoBan.isBanned(clientIp)) {
+      const isClientBanned = await autoBan.isBannedWithRedis(clientIp, redisState)
+      if (isClientBanned) {
         layerTrace[0].result = 'block'
         layerTrace[0].durationMs = Date.now() - l1
         _recordBlock('ip_banned')
@@ -288,7 +303,19 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       const rateLimitConfig = matchedRule?.rateLimit
         ?? (baseline ? { maxRequests: baseline.hardRateLimit, windowMs: 60_000 } : getDefaultRateLimit(sensitivity))
 
-      const rateResult = rateLimiter.check(clientIp, rateLimitConfig)
+      let rateResult = rateLimiter.check(clientIp, rateLimitConfig)
+      if (rateResult.allowed && redisState.available) {
+        const windowSecs = Math.ceil(rateLimitConfig.windowMs / 1000)
+        const redisResult = await redisState.incrRateLimit(
+          clientIp,
+          windowSecs,
+          rateLimitConfig.maxRequests,
+          sensitivity,
+        ).catch(() => null)
+        if (redisResult && !redisResult.allowed) {
+          rateResult = { allowed: false, remaining: 0, resetAt: Date.now() + rateLimitConfig.windowMs, retryAfter: windowSecs }
+        }
+      }
       if (!rateResult.allowed) {
         layerTrace[layerTrace.length - 1].result = 'block'
         layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
@@ -450,7 +477,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
         _recordBlock(primary?.attackType)
 
         if (primary) {
-          autoBan.recordViolation(clientIp, primary.attackType)
+          autoBan.banWithRedis(clientIp, primary.attackType, undefined, redisState)
           logger.info({
             event: 'attack_blocked', clientIp, method: req.method, path: pathname, requestId,
             attackType: primary.attackType, attackCategory: primary.attackCategory,
@@ -458,13 +485,24 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
             compositeScore: composite.score, layerTrace, statusCode: 403,
           })
 
+          const blockEvent = {
+            ip: clientIp, attackType: primary.attackType,
+            path: pathname, method: req.method, requestId,
+            compositeScore: composite.score, timestamp: Date.now(),
+          }
+
           // Fire onBlockEvent — use for Telegram alerts, DB logging, etc.
           if (config.onBlockEvent) {
-            Promise.resolve(config.onBlockEvent({
-              ip: clientIp, attackType: primary.attackType,
-              path: pathname, method: req.method, requestId,
-              compositeScore: composite.score, timestamp: Date.now(),
-            })).catch(() => {})
+            Promise.resolve(config.onBlockEvent(blockEvent)).catch(() => {})
+          }
+
+          // Fire event listeners (firewall.on('block', ...))
+          listeners.block?.forEach(fn => { try { fn(blockEvent) } catch {} })
+          listeners.attack?.forEach(fn => { try { fn(primary) } catch {} })
+
+          // Fire built-in Telegram alert if configured
+          if (telegramAlerter) {
+            telegramAlerter.alert(blockEvent).catch(() => {})
           }
 
           if (config.onBlocked) {
@@ -515,8 +553,17 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   // ─── Build FirewallInstance ───────────────────────────────────────────────
   const instance = handler as FirewallInstance
   instance.getBannedIPs = (): BannedIpEntry[] => autoBan.getBannedIPs()
-  instance.unbanIP      = (ip: string): boolean => autoBan.unban(ip)
-  instance.banIP        = (ip: string, reason = 'manual', durationMs?: number): void => autoBan.ban(ip, reason, durationMs)
+  instance.unbanIP      = (ip: string): boolean => {
+    autoBan.unbanWithRedis(ip, redisState)
+    return true
+  }
+  instance.banIP        = (ip: string, reason = 'manual', durationMs?: number): void => {
+    autoBan.banWithRedis(ip, reason, durationMs, redisState)
+  }
+  instance.on           = (event: 'block' | 'attack', listener: (event: any) => void): FirewallInstance => {
+    if (listeners[event]) listeners[event].push(listener)
+    return instance
+  }
   instance.getStats     = (): FirewallStats => ({
     totalBlocked,
     activeBans:        autoBan.getBannedIPs().length,
