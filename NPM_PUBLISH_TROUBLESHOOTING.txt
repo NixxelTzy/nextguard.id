@@ -1,0 +1,234 @@
+================================================================================
+  NPM PUBLISH TROUBLESHOOTING GUIDE
+  For: @nextguard/nextguard / nextguard-firewall
+  Written: October 2026
+================================================================================
+
+This document describes every error encountered when publishing to npmjs.com
+and the exact solution that worked for each one.
+
+--------------------------------------------------------------------------------
+ERROR 1: E403 Forbidden — Token Read-Only
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  npm error code E403
+  npm error 403 403 Forbidden - PUT https://registry.npmjs.org/<package>
+  npm error 403 In most cases, you or one of your dependencies are requesting
+  a package version that is forbidden by your security policy...
+
+CAUSE:
+  The npm access token used was created as a "Granular Access Token" with
+  "Read-only" permission instead of "Read and write".
+
+SOLUTION:
+  1. Go to https://www.npmjs.com/settings/<your-username>/tokens
+  2. Click "Generate New Token"
+  3. Choose "Granular Access Token"
+  4. Under "Packages and scopes":
+     - Set Permission to: "Read and write"
+     - Set Select packages to: "All packages"
+  5. Set expiration as needed, then click "Generate Token"
+  6. Copy the token and update your ~/.npmrc:
+       //registry.npmjs.org/:_authToken=<YOUR_NEW_TOKEN>
+
+NOTE:
+  If "Classic Token" is available on your npm account, choose:
+  Type: "Automation" — it has full publish rights and bypasses 2FA.
+
+--------------------------------------------------------------------------------
+ERROR 2: E403 Forbidden — Scoped Package (@scope/package) Not Accessible
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  npm error 403 Forbidden - PUT https://registry.npmjs.org/@nextguard%2fnextguard
+  npm error 403 You may not perform that action with these credentials.
+
+CAUSE:
+  The npm account does not own or belong to the "@nextguard" organization scope.
+  Scoped packages like @scope/package require the token's account to be a member
+  of that org scope.
+
+SOLUTION A (Use your own user scope):
+  Change the package name to use your own username as the scope:
+    - Wrong: "@nextguard/nextguard"  (requires org "nextguard")
+    - Right:  "@kyuraz/nextguard"    (your own user scope, always accessible)
+
+  Edit package.json:
+    "name": "@<your-npm-username>/nextguard"
+
+  Then publish with:
+    npm publish --access public
+
+SOLUTION B (Create the org):
+  1. Go to https://www.npmjs.com/org/create
+  2. Create an org matching the scope name (e.g. "nextguard")
+  3. Add your account as a member with "Owner" role
+  4. Then publish normally
+
+SOLUTION C (Remove scope, use unscoped name):
+  Change package name to an unscoped name:
+    "name": "nextguard-firewall"
+  No scope required, anyone can publish an unscoped package they own.
+
+--------------------------------------------------------------------------------
+ERROR 3: E403 Forbidden — npm CLI Checksum Bug (THE ROOT CAUSE IN THIS CASE)
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  Build succeeds, tarball is created, but:
+    npm error code E403
+    npm error 403 Forbidden - PUT https://registry.npmjs.org/<package>
+
+  This happens even with a valid Read+Write token on a package you own.
+  Occurs on npm v12.x with Node v24.x.
+
+CAUSE:
+  A bug in npm CLI v12.x causes the checksum/integrity value sent in the
+  publish payload to be malformed or empty, causing the registry to reject
+  the upload with 403 Forbidden.
+
+SOLUTION — Manual Publish via npm Registry API:
+
+  Instead of using "npm publish", publish directly via the registry REST API.
+  This bypasses the npm CLI entirely.
+
+  Step 1: Pack the tarball manually
+    npm pack
+
+  Step 2: Run this Node.js script to publish:
+
+  ─────────────────────────────────────────────────────────────────────────────
+  const fs = require('fs');
+  const crypto = require('crypto');
+
+  const token   = 'YOUR_NPM_TOKEN_HERE';
+  const tgz     = 'your-package-4.0.0.tgz';        // output of npm pack
+  const pkgName = 'your-package-name';               // from package.json "name"
+  const version = '4.0.0';                           // from package.json "version"
+
+  const tarball = fs.readFileSync(tgz);
+  const pkg     = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+
+  // Compute correct checksums (this is what npm CLI gets wrong)
+  const shasum  = crypto.createHash('sha1').update(tarball).digest('hex');
+  const integ   = 'sha512-' + crypto.createHash('sha512').update(tarball).digest('base64');
+
+  const body = {
+    _id: pkgName,
+    name: pkgName,
+    description: pkg.description,
+    'dist-tags': { latest: version },
+    versions: {
+      [version]: {
+        ...pkg,
+        _id: `${pkgName}@${version}`,
+        dist: {
+          tarball: `https://registry.npmjs.org/${pkgName}/-/${tgz}`,
+          shasum,
+          integrity: integ,
+        },
+      },
+    },
+    access: 'public',
+    _attachments: {
+      [tgz]: {
+        content_type: 'application/octet-stream',
+        data: tarball.toString('base64'),
+        length: tarball.length,
+      },
+    },
+  };
+
+  fetch(`https://registry.npmjs.org/${pkgName}`, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      'npm-command': 'publish',
+    },
+    body: JSON.stringify(body),
+  }).then(async r => {
+    console.log('Status:', r.status);   // 202 = success
+    console.log('Body:', await r.text());
+  });
+  ─────────────────────────────────────────────────────────────────────────────
+
+  Step 3: Run the script
+    node publish.mjs
+
+  Expected output on success:
+    Status: 202
+    Body: {"success":true}
+
+  Step 4: Verify the package is live
+    node -e "
+    fetch('https://registry.npmjs.org/<package-name>').then(async r => {
+      const d = await r.json();
+      console.log('name:', d.name);
+      console.log('versions:', Object.keys(d.versions || {}));
+      console.log('dist-tags:', d['dist-tags']);
+    });"
+
+--------------------------------------------------------------------------------
+ERROR 4: E409 — "Cannot publish over previously staged version"
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  Status: 409
+  Body: {"success":false,"error":"Cannot publish over previously staged version \"4.0.0\"."}
+
+CAUSE:
+  npm received and staged the tarball in a previous attempt, but the version
+  was not fully committed (e.g., integrity mismatch on that attempt).
+  The registry blocks re-publishing the same version number.
+
+SOLUTION:
+  Bump the patch version in package.json and re-pack:
+    "version": "4.0.1"   (was 4.0.0)
+
+  Then re-run npm pack and the manual publish script above.
+
+--------------------------------------------------------------------------------
+ERROR 5: E401 Unauthorized — Expired or Invalid Token
+--------------------------------------------------------------------------------
+
+SYMPTOM:
+  npm error code E401
+  npm error 401 Unauthorized - GET https://registry.npmjs.org/-/whoami
+
+CAUSE:
+  The token stored in ~/.npmrc has expired or was revoked (e.g., you
+  deleted the npm account that generated it, or the token expired).
+
+SOLUTION:
+  1. Generate a new token from https://www.npmjs.com/settings/<user>/tokens
+  2. Update ~/.npmrc:
+       //registry.npmjs.org/:_authToken=<NEW_TOKEN>
+  3. Verify: npm whoami
+
+--------------------------------------------------------------------------------
+QUICK REFERENCE — CHECKLIST BEFORE PUBLISHING
+--------------------------------------------------------------------------------
+
+  [ ] npm whoami returns your expected username (token is valid + has auth)
+  [ ] Token permission is "Read and write" (not Read-only)
+  [ ] package.json "name" scope matches your npm username or an org you own
+  [ ] package.json "version" is not already published (check npmjs.com)
+  [ ] Email on your npm account is verified
+  [ ] dist/ folder exists and is up to date (run npm run build first)
+  [ ] If npm publish fails with 403, use the manual API publish script above
+
+--------------------------------------------------------------------------------
+PUBLISHED RESULT (this project)
+--------------------------------------------------------------------------------
+
+  Package : nextguard-firewall
+  Version : 4.0.0
+  Account : kyuraz
+  URL     : https://www.npmjs.com/package/nextguard-firewall
+  Install : npm install nextguard-firewall
+
+================================================================================
+END OF FILE
+================================================================================

@@ -49,17 +49,26 @@ export async function POST(req: NextRequest) {
       blocked?: number
       attacks?: Record<string, number>
       tokensUsed?: number
+      origin?: string
     }
 
     const uid = record.userId
     const now = new Date()
     const hourStr = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, '0')}-${String(now.getUTCDate()).padStart(2, '0')}-${String(now.getUTCHours()).padStart(2, '0')}`
 
+    // Detect origin from header or body
+    const origin = body.origin
+      ?? req.headers.get('x-forwarded-host')
+      ?? req.headers.get('origin')
+      ?? req.headers.get('referer')
+      ?? 'unknown'
+
     const pipeline = redis.pipeline()
 
+    // ── Per-user stats ─────────────────────────────────────────
     if (body.requests && body.requests > 0) {
       pipeline.incrby(keys.statsRequests(uid, hourStr), body.requests)
-      pipeline.expire(keys.statsRequests(uid, hourStr), 86400 * 2) // keep 2 days
+      pipeline.expire(keys.statsRequests(uid, hourStr), 86400 * 2)
     }
     if (body.blocked && body.blocked > 0) {
       pipeline.incrby(keys.statsBlocked(uid, hourStr), body.blocked)
@@ -74,7 +83,29 @@ export async function POST(req: NextRequest) {
       pipeline.incrby(keys.statsTokens(uid), body.tokensUsed)
     }
 
-    // Update last used
+    // ── Per-key stats ──────────────────────────────────────────
+    if (body.requests && body.requests > 0) {
+      pipeline.incrby(keys.keyStatsRequests(keyId, hourStr), body.requests)
+      pipeline.expire(keys.keyStatsRequests(keyId, hourStr), 86400 * 2)
+    }
+    if (body.blocked && body.blocked > 0) {
+      pipeline.incrby(keys.keyStatsBlocked(keyId, hourStr), body.blocked)
+      pipeline.expire(keys.keyStatsBlocked(keyId, hourStr), 86400 * 2)
+    }
+    if (body.attacks) {
+      for (const [type, count] of Object.entries(body.attacks)) {
+        if (count > 0) pipeline.hincrby(keys.keyStatsAttacks(keyId), type, count)
+      }
+    }
+
+    // ── Track last seen & origin ───────────────────────────────
+    pipeline.set(keys.keyLastSeen(keyId), Date.now())
+    if (origin !== 'unknown') pipeline.set(keys.keyOrigin(keyId), origin)
+
+    // ── Register user in admin set ─────────────────────────────
+    pipeline.sadd(keys.allUsers(), uid)
+
+    // ── Update last used on key record ─────────────────────────
     pipeline.set(keys.apiKey(keyId), { ...record, lastUsedAt: Date.now() })
 
     await pipeline.exec()

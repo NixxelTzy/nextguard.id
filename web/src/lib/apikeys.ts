@@ -9,18 +9,29 @@ export interface ApiKeyRecord {
   keyHash: string
   keyPrefix: string
   createdAt: number
+  website?: string
+  lastUsedAt?: number
 }
 
 export async function createApiKey(
   userId: string,
   label: string,
+  website?: string,
 ): Promise<{ record: ApiKeyRecord; fullKey: string }> {
   const id = randomBytes(8).toString('hex')
   const rawKey = 'ng_' + randomBytes(24).toString('base64url')
   const keyHash = hashSecret(rawKey)
   const keyPrefix = rawKey.slice(0, 10)
 
-  const record: ApiKeyRecord = { id, userId, label, keyHash, keyPrefix, createdAt: Date.now() }
+  const record: ApiKeyRecord = {
+    id,
+    userId,
+    label,
+    keyHash,
+    keyPrefix,
+    createdAt: Date.now(),
+    website: website?.trim() ? website.trim() : undefined,
+  }
 
   await redis.set(keys.apiKey(id), record)
   await redis.set(keys.apiKeyHash(keyHash), id)

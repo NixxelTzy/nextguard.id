@@ -8,12 +8,12 @@ export async function POST(req: NextRequest) {
   const session = await getSession().catch(() => null)
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { label } = await req.json() as { label?: string }
+  const { label, website } = await req.json() as { label?: string; website?: string }
   if (!label?.trim() || label.length > 64) {
     return NextResponse.json({ error: 'Label must be 1–64 characters.' }, { status: 400 })
   }
 
-  const { record, fullKey } = await createApiKey(session.userId, label.trim())
+  const { record, fullKey } = await createApiKey(session.userId, label.trim(), website?.trim())
   return NextResponse.json({ record, fullKey })
 }
 

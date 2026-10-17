@@ -92,6 +92,7 @@ export async function activatePendingUser(token: string): Promise<User | null> {
 
   await redis.set(keys.userByEmail(data.email), uid)
   await redis.set(keys.userById(uid), user)
+  await redis.sadd(keys.allUsers(), uid)
   await redis.del(`ng:register:token:${token}`)
 
   return user

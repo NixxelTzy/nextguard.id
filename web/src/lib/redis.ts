@@ -31,4 +31,12 @@ export const keys = {
   statsBlocked: (uid: string, hour: string) => `ng:stats:blocked:${uid}:${hour}`,
   statsAttacks: (uid: string) => `ng:stats:attacks:${uid}`,
   statsTokens: (uid: string) => `ng:stats:tokens:${uid}`,
+  // Per-key stats (written by /api/report, keyed by API key id)
+  keyStatsRequests: (kid: string, hour: string) => `ng:kstats:req:${kid}:${hour}`,
+  keyStatsBlocked: (kid: string, hour: string) => `ng:kstats:blocked:${kid}:${hour}`,
+  keyStatsAttacks: (kid: string) => `ng:kstats:attacks:${kid}`,
+  keyLastSeen: (kid: string) => `ng:key:lastseen:${kid}`,
+  keyOrigin: (kid: string) => `ng:key:origin:${kid}`,
+  // Admin: set of all user ids
+  allUsers: () => `ng:admin:users`,
 }
