@@ -30,9 +30,9 @@ export function getPathSensitivity(pathname: string): PathSensitivity {
 
 export function getDefaultRateLimit(sensitivity: PathSensitivity): { maxRequests: number; windowMs: number } {
   switch (sensitivity) {
-    case 'maximum':  return { maxRequests: 10,  windowMs: 60_000 }
-    case 'standard': return { maxRequests: 100, windowMs: 60_000 }
-    case 'baseline': return { maxRequests: 500, windowMs: 60_000 }
+    case 'maximum':  return { maxRequests: 300,   windowMs: 60_000 }
+    case 'standard': return { maxRequests: 1_500, windowMs: 60_000 }
+    case 'baseline': return { maxRequests: 3_000, windowMs: 60_000 }
   }
 }
 

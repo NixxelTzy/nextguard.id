@@ -448,6 +448,8 @@ export type OnBlockEventCallback = (event: {
 
 export interface FirewallConfig {
   rules?: RuleConfig[]
+  /** Global rate limit configuration override */
+  rateLimit?: RateLimitConfig
   /** Security profile preset — overrides individual thresholds */
   profile?: import('./rule-groups.js').SecurityProfile
   /** Custom rules defined by the user */

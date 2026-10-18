@@ -90,20 +90,21 @@ export class CompositeScoringEngine {
     hasHighConfidence: boolean,
     hasImmediateBlock: boolean,
   ): RequestAction {
-    // Immediate block for very high confidence single signals
+    // Immediate block for very high confidence single signals (definite exploits)
     if (hasImmediateBlock) return 'block'
 
     if (this.strictMode) {
-      if (score >= 0.30 || hasHighConfidence) return 'block'
-      if (score >= 0.15) return 'soft_block'
-      if (score >= 0.08) return 'flag'
+      if (score >= 0.50 || (hasHighConfidence && score >= 0.30)) return 'block'
+      if (score >= 0.25) return 'soft_block'
+      if (score >= 0.10) return 'flag'
       return 'pass'
     }
-    // Default mode — tuned for signal.weight-based scoring
-    // Single SQLi (weight=0.35, confidence=0.90): 0.35×0.90 = 0.315 + bonus 0.35×0.15 = 0.0525 → total 0.367 → block
-    if (score >= 0.50 || (hasHighConfidence && score >= 0.25)) return 'block'
-    if (score >= 0.30) return 'soft_block'
-    if (score >= 0.15) return 'flag'
+
+    // Default mode — balanced for zero false-positives on normal traffic & logins
+    // Definite attack payloads cross >= 0.45 with high confidence or >= 0.65 composite score
+    if (score >= 0.65 || (hasHighConfidence && score >= 0.45)) return 'block'
+    if (score >= 0.35) return 'soft_block'
+    if (score >= 0.18) return 'flag'
     return 'pass'
   }
 

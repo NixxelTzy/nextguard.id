@@ -85,6 +85,29 @@ function jsonResponse(status: number, error: string, reason: string): Response {
   })
 }
 
+const SENSITIVE_KEY_REGEX = /^(password|passwd|pwd|pass|secret|token|refresh_token|refreshtoken|access_token|accesstoken|authorization|api_key|apikey|private_key|privatekey)$/i
+
+function sanitizePayloadForDetection(raw: string, parsed: unknown): string {
+  if (!raw || raw.length === 0) return raw
+  if (parsed && typeof parsed === 'object') {
+    try {
+      const sanitized = JSON.parse(JSON.stringify(parsed, (key, value) => {
+        if (typeof value === 'string' && SENSITIVE_KEY_REGEX.test(key)) {
+          return '[REDACTED_CREDENTIAL]'
+        }
+        return value
+      }))
+      return JSON.stringify(sanitized)
+    } catch {
+      return raw
+    }
+  }
+  if (raw.includes('=') && SENSITIVE_KEY_REGEX.test(raw)) {
+    return raw.replace(/([?&]?(?:password|passwd|pwd|secret|token|apiKey)=)([^&]+)/gi, '$1[REDACTED_CREDENTIAL]')
+  }
+  return raw
+}
+
 // ─── Factory ──────────────────────────────────────────────────────────────────
 export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const logger    = new Logger(config.logging ?? 'info', config.customLogger)
@@ -217,7 +240,8 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
       // ── Normalize ─────────────────────────────────────────────────────
       const SKIP_HEADERS = new Set(['accept', 'accept-encoding', 'accept-language', 'connection', 'host', 'cache-control'])
-      const allFields: Record<string, string> = { url: pathname, body: rawBody, ...query }
+      const scanBody = sanitizePayloadForDetection(rawBody, parsedBody)
+      const allFields: Record<string, string> = { url: pathname, body: scanBody, ...query }
       for (const [k, v] of Object.entries(headersObj)) {
         if (!SKIP_HEADERS.has(k)) allFields[`header:${k}`] = v
       }
@@ -300,8 +324,9 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
       const sensitivity    = getPathSensitivity(pathname)
       const baseline       = autoTuner.getBaseline(pathname)
-      const rateLimitConfig = matchedRule?.rateLimit
-        ?? (baseline ? { maxRequests: baseline.hardRateLimit, windowMs: 60_000 } : getDefaultRateLimit(sensitivity))
+      const rateLimitConfig = config.rateLimit
+        ?? matchedRule?.rateLimit
+        ?? (baseline ? { maxRequests: Math.max(baseline.hardRateLimit, 1000), windowMs: 60_000 } : getDefaultRateLimit(sensitivity))
 
       let rateResult = rateLimiter.check(clientIp, rateLimitConfig)
       if (rateResult.allowed && redisState.available) {

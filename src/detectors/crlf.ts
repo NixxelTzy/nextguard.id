@@ -66,8 +66,15 @@ export function detectCrlf(fields: Record<string, string>): ThreatSignal | null 
   for (const [fieldName, rawValue] of Object.entries(fields)) {
     if (!rawValue) continue
 
+    const isBodyField = fieldName === 'body' || fieldName.startsWith('body')
+
     // Check raw value (before normalization) for literal CRLF
+    // NOTE: In request bodies (e.g. JSON or form text), literal \n or \r\n is valid.
+    // Literal CRLF is only an attack when present in headers, query params, or URL.
     for (const { pattern, name, confidence } of CRLF_PATTERNS) {
+      if (isBodyField && (name === 'crlf_literal' || name === 'cr_literal' || name === 'lf_literal' || name === 'lf_escaped' || name === 'cr_escaped' || name === 'crlf_escaped')) {
+        continue
+      }
       if (pattern.test(rawValue)) {
         return {
           source: 'signature',

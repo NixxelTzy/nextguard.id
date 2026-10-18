@@ -79,6 +79,29 @@ function jsonResponse(status: number, error: string, reason: string): Response {
   })
 }
 
+const SENSITIVE_KEY_REGEX = /^(password|passwd|pwd|pass|secret|token|refresh_token|refreshtoken|access_token|accesstoken|authorization|api_key|apikey|private_key|privatekey)$/i
+
+function sanitizePayloadForDetection(raw: string, parsed: unknown): string {
+  if (!raw || raw.length === 0) return raw
+  if (parsed && typeof parsed === 'object') {
+    try {
+      const sanitized = JSON.parse(JSON.stringify(parsed, (key, value) => {
+        if (typeof value === 'string' && SENSITIVE_KEY_REGEX.test(key)) {
+          return '[REDACTED_CREDENTIAL]'
+        }
+        return value
+      }))
+      return JSON.stringify(sanitized)
+    } catch {
+      return raw
+    }
+  }
+  if (raw.includes('=') && SENSITIVE_KEY_REGEX.test(raw)) {
+    return raw.replace(/([?&]?(?:password|passwd|pwd|secret|token|apiKey)=)([^&]+)/gi, '$1[REDACTED_CREDENTIAL]')
+  }
+  return raw
+}
+
 export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const scoring    = new CompositeScoringEngine(undefined, config.strictMode ?? false)
   const rateLimiter = new RateLimiter()
@@ -171,7 +194,8 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
     // Normalize
     const SKIP = new Set(['accept', 'accept-encoding', 'accept-language', 'connection', 'host', 'cache-control'])
-    const allFields: Record<string, string> = { url: pathname, body: rawBody, ...query }
+    const scanBody = sanitizePayloadForDetection(rawBody, parsedBody)
+    const allFields: Record<string, string> = { url: pathname, body: scanBody, ...query }
     for (const [k, v] of Object.entries(headersObj)) {
       if (!SKIP.has(k)) allFields[`header:${k}`] = v
     }
@@ -216,7 +240,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
     const l2 = Date.now()
     layerTrace.push({ layer: 2, name: 'rate_control', result: 'pass', durationMs: 0 })
     const sensitivity    = getPathSensitivity(pathname)
-    const rateLimitConfig = matchedRule?.rateLimit ?? getDefaultRateLimit(sensitivity)
+    const rateLimitConfig = config.rateLimit ?? matchedRule?.rateLimit ?? getDefaultRateLimit(sensitivity)
     let rateResult = rateLimiter.check(clientIp, rateLimitConfig)
     if (rateResult.allowed && redisState.available) {
       const windowSecs = Math.ceil(rateLimitConfig.windowMs / 1000)

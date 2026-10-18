@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
-  const hasSession = req.cookies.has('ng_session')
+  const sessionCookie = req.cookies.get('ng_session')?.value
+  const hasSession = !!sessionCookie && sessionCookie.trim().length > 0
 
   // Protect dashboard
   if (pathname.startsWith('/dashboard') && !hasSession) {

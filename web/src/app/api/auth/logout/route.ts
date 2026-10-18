@@ -3,16 +3,31 @@ import { deleteSession } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
+function clearSessionCookie(res: NextResponse) {
+  res.cookies.set('ng_session', '', {
+    path: '/',
+    maxAge: 0,
+    expires: new Date(0),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax',
+  })
+}
+
 export async function POST(req: NextRequest) {
   const sid = req.cookies.get('ng_session')?.value
   if (sid) await deleteSession(sid).catch(() => {})
 
-  const response = NextResponse.redirect(new URL('/login', req.url))
-  response.cookies.delete('ng_session')
+  const response = NextResponse.redirect(new URL('/login', req.url), 303)
+  clearSessionCookie(response)
   return response
 }
 
-// Required so Next.js does not fail to collect page data during build
-export async function GET() {
-  return NextResponse.json({ error: 'Method not allowed' }, { status: 405 })
+export async function GET(req: NextRequest) {
+  const sid = req.cookies.get('ng_session')?.value
+  if (sid) await deleteSession(sid).catch(() => {})
+
+  const response = NextResponse.redirect(new URL('/login', req.url), 303)
+  clearSessionCookie(response)
+  return response
 }
