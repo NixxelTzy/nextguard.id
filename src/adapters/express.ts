@@ -95,7 +95,11 @@ export function nextguardExpress(config: FirewallConfig = {}) {
         const url = new URL(fullUrl)
         const matchedRule = config.rules?.find(r => matchPath(r.path, url.pathname))
 
-        if (matchedRule?.forceTerminate && res.socket?.destroy) {
+        const isForceTerminate = matchedRule?.forceTerminate ||
+          result.headers.get('x-nextguard-action') === 'force_terminate' ||
+          config.forceTerminate
+
+        if (isForceTerminate && res.socket?.destroy) {
           res.socket.destroy()
           return
         }

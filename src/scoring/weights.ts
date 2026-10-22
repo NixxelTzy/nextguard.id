@@ -4,15 +4,9 @@
 
 import type { SignalSource } from '../types.js'
 
-export interface SignalWeights {
-  signature: number
-  behavioral: number
-  ip_reputation: number
-  protocol_anomaly: number
-  tls_fingerprint: number
-  payload_entropy: number
-  timing: number
-}
+export type SignalWeights = Record<SignalSource, number>
+
+
 
 export const DEFAULT_WEIGHTS: SignalWeights = {
   signature:        0.55,  // WAF detectors — main blocking signal
@@ -22,7 +16,10 @@ export const DEFAULT_WEIGHTS: SignalWeights = {
   tls_fingerprint:  0.10,
   payload_entropy:  0.05,
   timing:           0.00,
+  machine_learning: 0.40,
+  anomaly_detection:0.35,
 }
+
 
 export interface WeightObservation {
   source: SignalSource

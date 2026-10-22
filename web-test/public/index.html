@@ -1,0 +1,1377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NextGuard WAF — Attack & Stress Simulation Lab</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #07090e;
+      --card-bg: #0d111a;
+      --card-inner: #131926;
+      --border: #1f293d;
+      --border-focus: #38bdf8;
+      --text: #f1f5f9;
+      --text-muted: #64748b;
+      --text-dim: #475569;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.15);
+      --danger: #f43f5e;
+      --danger-bg: rgba(244, 63, 94, 0.1);
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.1);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.1);
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow-x: hidden;
+    }
+
+    header {
+      background: rgba(13, 17, 26, 0.85);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      padding: 12px 24px;
+    }
+
+    .header-container {
+      max-width: 1440px;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, #0284c7, #38bdf8);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+    }
+
+    .brand-title {
+      font-size: 17px;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .badge-live {
+      background: #064e3b;
+      color: #34d399;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 9999px;
+      border: 1px solid #059669;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .stats-bar {
+      display: flex;
+      align-items: center;
+      gap: 18px;
+    }
+
+    .stat-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+    }
+
+    .stat-pill .val {
+      font-weight: 700;
+      color: var(--accent);
+      font-family: var(--font-mono);
+    }
+
+    .btn {
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font-sans);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn:hover {
+      border-color: var(--accent);
+      color: #fff;
+    }
+    .btn-danger {
+      background: var(--danger-bg);
+      border-color: rgba(244, 63, 94, 0.3);
+      color: var(--danger);
+    }
+    .btn-danger:hover {
+      background: var(--danger);
+      color: #fff;
+    }
+    .btn-primary {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #fff;
+    }
+    .btn-primary:hover {
+      background: #0369a1;
+    }
+
+    main {
+      max-width: 1440px;
+      margin: 0 auto;
+      padding: 20px;
+      width: 100%;
+      flex: 1;
+      display: grid;
+      grid-template-columns: minmax(0, 1.35fr) minmax(320px, 420px);
+      gap: 20px;
+    }
+
+    @media (max-width: 1120px) {
+      main {
+        grid-template-columns: 1fr;
+      }
+      .console-panel {
+        position: static !important;
+        height: 520px !important;
+      }
+    }
+
+    .ban-banner {
+      background: linear-gradient(90deg, #450a0a, #7f1d1d);
+      border-bottom: 1px solid #ef4444;
+      padding: 10px 24px;
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      color: #fecaca;
+      font-size: 13px;
+      box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+    }
+
+    /* Tabs */
+    .tabs-nav {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding-bottom: 8px;
+      margin-bottom: 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tab-btn {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      font-weight: 600;
+      padding: 8px 14px;
+      border-radius: 8px;
+      cursor: pointer;
+      white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.15s;
+    }
+
+    .tab-btn:hover {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .tab-btn.active {
+      color: #fff;
+      background: var(--card-bg);
+      border-color: var(--border);
+      border-bottom-color: var(--accent);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+
+    .card-header {
+      margin-bottom: 16px;
+    }
+
+    .card-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 4px;
+    }
+
+    .card-desc {
+      font-size: 12px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+
+    .preset-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .preset-item {
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      transition: all 0.15s;
+    }
+
+    .preset-item:hover {
+      border-color: rgba(56, 189, 248, 0.4);
+      background: #171f2f;
+    }
+
+    .preset-info {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .preset-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 2px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .preset-code {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      display: block;
+    }
+
+    .badge-type {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+    .badge-attack {
+      background: var(--danger-bg);
+      color: var(--danger);
+      border: 1px solid rgba(244, 63, 94, 0.2);
+    }
+    .badge-safe {
+      background: var(--success-bg);
+      color: var(--success);
+      border: 1px solid rgba(16, 185, 129, 0.2);
+    }
+
+    /* DDoS Studio */
+    .ddos-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 12px;
+      margin-bottom: 20px;
+    }
+
+    .meter-card {
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      text-align: center;
+    }
+
+    .meter-val {
+      font-family: var(--font-mono);
+      font-size: 24px;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+
+    .meter-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .progress-bar-container {
+      height: 6px;
+      background: var(--card-inner);
+      border-radius: 3px;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #0284c7, #38bdf8);
+      width: 0%;
+      transition: width 0.2s ease;
+    }
+
+    /* Console / Right panel */
+    .console-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 120px);
+      position: sticky;
+      top: 80px;
+      overflow: hidden;
+    }
+
+    .console-header {
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(13, 17, 26, 0.6);
+    }
+
+    .console-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .console-logs {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .log-entry {
+      background: var(--card-inner);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      cursor: pointer;
+      transition: border-color 0.15s;
+    }
+
+    .log-entry:hover {
+      border-color: var(--accent);
+    }
+
+    .log-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 4px;
+    }
+
+    .log-method {
+      font-weight: 700;
+      color: #94a3b8;
+    }
+
+    .log-path {
+      color: #e2e8f0;
+      font-weight: 500;
+      margin-left: 6px;
+    }
+
+    .status-badge {
+      font-weight: 700;
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+    }
+    .status-200 { background: var(--success-bg); color: var(--success); }
+    .status-403 { background: var(--danger-bg); color: var(--danger); }
+    .status-413 { background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid #ef4444; }
+    .status-429 { background: var(--warning-bg); color: var(--warning); }
+    .status-503 { background: #3b0764; color: #d8b4fe; }
+
+    .log-desc {
+      color: var(--text-muted);
+      font-size: 10px;
+      margin-top: 4px;
+      line-height: 1.4;
+    }
+
+    /* Modal */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    .modal-overlay.open {
+      display: flex;
+    }
+
+    .modal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      width: 600px;
+      max-width: 100%;
+      max-height: 85vh;
+      overflow-y: auto;
+      padding: 24px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Top Header -->
+  <header>
+    <div class="header-container">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="20" height="20" fill="none" viewBox="0 0 24 24">
+            <path d="M12 2L3 7v5c0 5.25 3.75 10.15 9 11.35C17.25 22.15 21 17.25 21 12V7L12 2z" fill="#fff"/>
+          </svg>
+        </div>
+        <div>
+          <div class="brand-title">
+            NextGuard WAF
+            <span class="badge-live">Active L7 Protection</span>
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">
+            Interactive Attack Range & Capacity Stress Testing Studio
+          </div>
+        </div>
+      </div>
+
+      <div class="stats-bar">
+        <div class="stat-pill">
+          <span>Mode:</span>
+          <span class="val" id="stat-mode">Full Protection</span>
+        </div>
+        <div class="stat-pill">
+          <span>Blocked Attacks:</span>
+          <span class="val" style="color: var(--danger);" id="stat-blocked">0</span>
+        </div>
+        <div class="stat-pill" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1);">
+          <span>💥 Destroyed:</span>
+          <span class="val" style="color: #ef4444; font-weight: 700;" id="stat-destroyed">0</span>
+        </div>
+        <div class="stat-pill">
+          <span>Active Bans:</span>
+          <span class="val" style="color: var(--warning);" id="stat-bans">0</span>
+        </div>
+        <button class="btn btn-danger" onclick="unbanAll()">Unban All IPs</button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Active IP Ban Warning Banner -->
+  <div id="ban-banner" class="ban-banner">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 18px;">⚠️</span>
+      <div>
+        <strong>ATTENTION: IP BAN ACTIVE</strong> &mdash; 
+        <span id="ban-banner-msg">Your IP address is currently banned by NextGuard auto-ban! All incoming requests will be rejected at Layer 1 (403 Forbidden).</span>
+      </div>
+    </div>
+    <button class="btn" style="background: #ef4444; border-color: #f87171; color: #fff; font-size: 11px; padding: 6px 12px; font-weight: 700;" onclick="unbanAll()">⚡ Unban My IP Now</button>
+  </div>
+
+  <!-- Main Grid -->
+  <main>
+    <!-- Left: Testing Controls -->
+    <div>
+      <div class="tabs-nav">
+        <button class="tab-btn active" onclick="switchTab('tab-ddos')">🚀 DDoS & Flood (>1k reqs)</button>
+        <button class="tab-btn" onclick="switchTab('tab-payload')">💣 Payload Bomb (1MB+ Limit)</button>
+        <button class="tab-btn" onclick="switchTab('tab-sqli')">💉 SQL Injection</button>
+        <button class="tab-btn" onclick="switchTab('tab-xss')">☣️ XSS Injection</button>
+        <button class="tab-btn" onclick="switchTab('tab-lfi')">📁 Path Traversal</button>
+        <button class="tab-btn" onclick="switchTab('tab-rce')">⚡ RCE / Command</button>
+        <button class="tab-btn" onclick="switchTab('tab-nosql')">🍃 NoSQL Inject</button>
+        <button class="tab-btn" onclick="switchTab('tab-honeypot')">🍯 Honeypots</button>
+        <button class="tab-btn" onclick="switchTab('tab-custom')">🛠️ Custom Payload</button>
+      </div>
+
+      <!-- Tab: DDoS & Stress -->
+      <div id="tab-ddos" class="tab-content active">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">DDoS & High-Volume Request Stress Test &mdash; Sistem Penghancuran Paksa</div>
+            <div class="card-desc">
+              NextGuard firewall dilengkapi <strong>Sistem Penghancuran Paksa (Force Termination & TCP Socket Destroyer)</strong>. Normal user (< 300 req/min) tidak akan pernah diblokir. Namun saat serangan flood/DoS terdeteksi (> 300 req/min), NextGuard langsung memutus koneksi TCP (<code>req.socket.destroy()</code>), mem-ban IP penyerang, dan merebut kembali resource CPU & RAM server.
+            </div>
+          </div>
+
+          <!-- Auto-unban helper -->
+          <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 16px; padding: 10px 14px; background: var(--card-inner); border-radius: 8px; border: 1px solid var(--border);">
+            <input type="checkbox" id="chk-auto-unban" checked style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
+            <label for="chk-auto-unban" style="font-size: 12px; color: var(--text); cursor: pointer; flex: 1;">
+              <strong>Auto-unban IP before starting test</strong> (Recommended &mdash; resets any previous bans so you can observe live 200 OK throughput, rate limiter throttling, and terminal logs)
+            </label>
+          </div>
+
+          <div class="ddos-grid">
+            <div class="meter-card">
+              <div class="meter-val" id="ddos-sent">0</div>
+              <div class="meter-label">Requests Sent</div>
+            </div>
+            <div class="meter-card">
+              <div class="meter-val" style="color: var(--success);" id="ddos-200">0</div>
+              <div class="meter-label">Allowed (200 OK)</div>
+            </div>
+            <div class="meter-card">
+              <div class="meter-val" style="color: var(--warning);" id="ddos-429">0</div>
+              <div class="meter-label">Blocked / Throttled</div>
+            </div>
+            <div class="meter-card" style="border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08);">
+              <div class="meter-val" style="color: #ef4444;" id="ddos-destroyed">0</div>
+              <div class="meter-label">💥 Socket Destroyed</div>
+            </div>
+            <div class="meter-card">
+              <div class="meter-val" style="color: var(--accent);" id="ddos-speed">0</div>
+              <div class="meter-label">Speed (req/s)</div>
+            </div>
+          </div>
+
+          <div class="progress-bar-container">
+            <div class="progress-bar-fill" id="ddos-progress"></div>
+          </div>
+
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-size: 12px; color: var(--text-muted);">Batch Count:</span>
+              <button class="btn" onclick="startDdos(100, 20)">100 reqs (Safe)</button>
+              <button class="btn" onclick="startDdos(300, 30)">300 reqs (Limit)</button>
+              <button class="btn btn-danger" style="background: linear-gradient(135deg, #ef4444, #b91c1c); color: #fff; font-weight: 700;" onclick="startDdos(600, 40)">💥 600 reqs (Penghancuran Paksa)</button>
+              <button class="btn btn-primary" onclick="startDdos(1200, 60)">⚡ 1,200 reqs (Flood Bomb)</button>
+            </div>
+            <button class="btn btn-danger" id="btn-stop-ddos" style="display: none;" onclick="stopDdos()">Stop Test</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Payload Attack & 1MB Enforcement -->
+      <div id="tab-payload" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">💣 Payload Bomb, Buffer Overflow & 1MB Enforcement</div>
+            <div class="card-desc">
+              NextGuard enforces an uncompromising 1MB maximum payload limit (<code>maxPayloadSize: 1024 * 1024</code>) with <strong>Force Termination</strong>. 
+              Massive payloads are intercepted <em>before</em> full memory buffering via Content-Length inspection and streaming chunk limits. 
+              NextGuard immediately responds with <code>413 Payload Too Large</code>, attaches <code>X-NextGuard-Action: force_terminate</code>, and severes the TCP connection socket (<code>req.socket.destroy()</code>) immediately.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Safe 500 KB Payload -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-safe">LEGITIMATE</span>
+                  Safe 500 KB Payload (Within 1MB Allowance)
+                </div>
+                <code class="preset-code">POST /api/upload [500 KB JSON payload] &rarr; Expected 200 OK</code>
+              </div>
+              <button class="btn btn-primary" onclick="sendPayloadTest(500 * 1024, 'Safe 500KB Payload')">Send Safe (500KB)</button>
+            </div>
+
+            <!-- Malicious 1.5 MB Payload Bomb -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">PAYLOAD ATTACK</span>
+                  1.5 MB Payload Bomb (Exceeds 1MB Limit &mdash; Force Terminated)
+                </div>
+                <code class="preset-code">POST /api/upload [1.5 MB buffer] &rarr; 413 Payload Too Large + Socket Destroyed</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendPayloadTest(1.5 * 1024 * 1024, '1.5MB Payload Bomb')">💥 Send 1.5 MB Attack</button>
+            </div>
+
+            <!-- Extreme 5 MB Buffer Overflow Attempt -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">BUFFER OVERFLOW</span>
+                  5.0 MB Flood Attack (Immediate Socket Severance)
+                </div>
+                <code class="preset-code">POST /api/upload [5.0 MB buffer stream] &rarr; Instant Socket Destruction</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendPayloadTest(5 * 1024 * 1024, '5MB Flood Attack')">⚡ Send 5 MB Flood</button>
+            </div>
+
+            <!-- Interactive Slider Generator -->
+            <div class="preset-item" style="flex-direction: column; align-items: stretch; gap: 12px; background: #0f1522;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div class="preset-name">
+                  <span class="badge-type" style="background: rgba(56, 189, 248, 0.15); color: var(--accent); border: 1px solid rgba(56, 189, 248, 0.3);">INTERACTIVE SLIDER</span>
+                  Interactive Custom Payload Generator
+                </div>
+                <span id="slider-size-label" style="font-family: var(--font-mono); font-size: 14px; font-weight: 700; color: var(--accent);">1.2 MB</span>
+              </div>
+              <input type="range" id="payload-slider" min="100" max="5000" step="100" value="1200" oninput="updateSliderLabel(this.value)" style="width: 100%; accent-color: var(--accent); cursor: pointer;">
+              <div style="display: flex; justify-content: space-between; font-size: 11px; color: var(--text-muted);">
+                <span>100 KB (Safe)</span>
+                <span style="color: var(--warning); font-weight: 600;">1 MB (NextGuard Limit)</span>
+                <span style="color: var(--danger); font-weight: 600;">5 MB (Crash Attack)</span>
+              </div>
+              <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                <button class="btn btn-primary" onclick="sendCustomSizePayload()">Send Selected Payload</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: SQL Injection -->
+      <div id="tab-sqli" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">SQL Injection Attacks & Normal Login Comparison</div>
+            <div class="card-desc">
+              Test whether classic SQLi bypasses, UNION queries, and comment injections are blocked, while verifying that legitimate login passwords with symbols (#, --) pass cleanly!
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Safe Login -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-safe">LEGITIMATE LOGIN</span>
+                  Normal User Login with Special Password (#, --, quotes)
+                </div>
+                <code class="preset-code">POST /api/login {"email":"admin@nextguard.id", "password":"MySecureP@ss#2026--!"}</code>
+              </div>
+              <button class="btn btn-primary" onclick="sendReq('POST', '/api/login', {}, JSON.stringify({ email: 'admin@nextguard.id', password: 'MySecureP@ss#2026--!' }), 'Safe User Login')">Send Safe</button>
+            </div>
+
+            <!-- Boolean blind -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Boolean-based Auth Bypass (' OR 1=1)
+                </div>
+                <code class="preset-code">POST /api/login {"email":"' OR 1=1 --", "password":"wrong"}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/login', {}, JSON.stringify({ email: '\' OR 1=1 --', password: 'wrong' }), 'SQLi: Auth Bypass (OR 1=1)')">Test Attack</button>
+            </div>
+
+            <!-- UNION SELECT -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  UNION-based Data Extraction
+                </div>
+                <code class="preset-code">GET /api/users/1%20UNION%20SELECT%20null,username,password%20FROM%20users--</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/users/1%20UNION%20SELECT%20null,username,password%20FROM%20users--', {}, null, 'SQLi: UNION SELECT Extraction')">Test Attack</button>
+            </div>
+
+            <!-- Stacked query -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Stacked DML Query (DROP TABLE)
+                </div>
+                <code class="preset-code">GET /api/search?q=phone;%20DROP%20TABLE%20users;%20--</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/search?q=phone;%20DROP%20TABLE%20users;%20--', {}, null, 'SQLi: Stacked Query DROP')">Test Attack</button>
+            </div>
+
+            <!-- MySQL Comment Bypass -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  MySQL Conditional Comment Bypass (/*!50000UNION*/)
+                </div>
+                <code class="preset-code">GET /api/search?q=1/*!50000UNION*//*!50000SELECT*/1,2,3</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/search?q=1/*!50000UNION*//*!50000SELECT*/1,2,3', {}, null, 'SQLi: Version Comment Bypass')">Test Attack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: XSS -->
+      <div id="tab-xss" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Cross-Site Scripting (XSS) Defenses</div>
+            <div class="card-desc">
+              NextGuard scans query parameters, form bodies, and headers for script tags, onerror handlers, and javascript: protocols.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Safe Comment -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-safe">LEGITIMATE</span>
+                  Normal User Comment
+                </div>
+                <code class="preset-code">POST /api/comments {"author":"Alice", "content":"Great job! The dashboard looks very clean."}</code>
+              </div>
+              <button class="btn btn-primary" onclick="sendReq('POST', '/api/comments', {}, JSON.stringify({ author: 'Alice', content: 'Great job! The dashboard looks very clean.' }), 'Safe User Comment')">Send Safe</button>
+            </div>
+
+            <!-- Script tag -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Reflected Script Tag Injection
+                </div>
+                <code class="preset-code">GET /api/search?q=&lt;script&gt;alert(document.cookie)&lt;/script&gt;</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/search?q=%3Cscript%3Ealert(document.cookie)%3C/script%3E', {}, null, 'XSS: Script Tag')">Test Attack</button>
+            </div>
+
+            <!-- Event handler -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Image OnError Event Handler
+                </div>
+                <code class="preset-code">POST /api/comments {"author":"Hacker", "content":"&lt;img src=x onerror=alert(1)&gt;"}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/comments', {}, JSON.stringify({ author: 'Hacker', content: '<img src=x onerror=alert(1)>' }), 'XSS: OnError Image')">Test Attack</button>
+            </div>
+
+            <!-- Javascript URI -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  javascript: Protocol Injection
+                </div>
+                <code class="preset-code">GET /api/search?q=javascript:fetch('//evil.com')</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/search?q=javascript:fetch(%27//evil.com%27)', {}, null, 'XSS: Javascript URI')">Test Attack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: LFI / Path Traversal -->
+      <div id="tab-lfi" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Path Traversal & Local File Inclusion</div>
+            <div class="card-desc">
+              Detects dot-dot-slash sequences in path, query, and encoded variants attempting to read sensitive system files.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Safe File -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-safe">LEGITIMATE</span>
+                  Normal File Request
+                </div>
+                <code class="preset-code">GET /api/file?path=annual_report_2026.pdf</code>
+              </div>
+              <button class="btn btn-primary" onclick="sendReq('GET', '/api/file?path=annual_report_2026.pdf', {}, null, 'Safe File Download')">Send Safe</button>
+            </div>
+
+            <!-- Traversal unix -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Linux /etc/passwd Traversal
+                </div>
+                <code class="preset-code">GET /api/file?path=../../../../etc/passwd</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/file?path=../../../../etc/passwd', {}, null, 'LFI: /etc/passwd')">Test Attack</button>
+            </div>
+
+            <!-- URL encoded traversal -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  URL-Encoded Traversal (%2e%2e%2f)
+                </div>
+                <code class="preset-code">GET /api/file?path=%2e%2e%2f%2e%2e%2fetc%2fshadow</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/file?path=%2e%2e%2f%2e%2e%2fetc%2fshadow', {}, null, 'LFI: Encoded Traversal')">Test Attack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: RCE -->
+      <div id="tab-rce" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Remote Code Execution (RCE) / Command Injection</div>
+            <div class="card-desc">
+              Stops OS command concatenation via pipes (|), semicolons (;), backticks (`), and subprocess spawners.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Semicolon cat -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Semicolon Command Chaining (; cat /etc/passwd)
+                </div>
+                <code class="preset-code">POST /api/exec {"host":"127.0.0.1; cat /etc/passwd"}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/exec', {}, JSON.stringify({ host: '127.0.0.1; cat /etc/passwd' }), 'RCE: Semicolon Chain')">Test Attack</button>
+            </div>
+
+            <!-- Pipe whoami -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Pipe Redirection (| whoami)
+                </div>
+                <code class="preset-code">POST /api/exec {"host":"localhost | whoami"}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/exec', {}, JSON.stringify({ host: 'localhost | whoami' }), 'RCE: Pipe Whoami')">Test Attack</button>
+            </div>
+
+            <!-- Subshell -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  Subshell Execution ($(id))
+                </div>
+                <code class="preset-code">GET /api/search?q=$(id)</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/api/search?q=$(id)', {}, null, 'RCE: Subshell $(id)')">Test Attack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: NoSQL -->
+      <div id="tab-nosql" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">NoSQL Injection Defenses</div>
+            <div class="card-desc">
+              Detects MongoDB $gt, $ne, $regex operator injection in JSON bodies while preserving normal JSON fields.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <!-- Operator injection -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  MongoDB $gt Operator Auth Bypass
+                </div>
+                <code class="preset-code">POST /api/data {"username":"admin", "password":{"$gt":""}}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/data', {}, JSON.stringify({ username: 'admin', password: { '$gt': '' } }), 'NoSQL: $gt Operator')">Test Attack</button>
+            </div>
+
+            <!-- $where javascript -->
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">ATTACK</span>
+                  MongoDB $where Clause Execution
+                </div>
+                <code class="preset-code">POST /api/data {"$where":"this.password.length > 0"}</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('POST', '/api/data', {}, JSON.stringify({ '$where': 'this.password.length > 0' }), 'NoSQL: $where Code')">Test Attack</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Honeypot -->
+      <div id="tab-honeypot" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Honeypot Traps & Immediate IP Ban</div>
+            <div class="card-desc">
+              Probing common scanner targets (/.env, /.git, /wp-admin) triggers NextGuard's honeypot trap, returning deceptive content and automatically blacklisting the attacker's IP.
+            </div>
+          </div>
+
+          <div class="preset-list">
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">HONEYPOT TRAP</span>
+                  /.env Environment File Probe
+                </div>
+                <code class="preset-code">GET /.env</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/.env', {}, null, 'Honeypot: /.env Probe')">Probe Trap</button>
+            </div>
+
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">HONEYPOT TRAP</span>
+                  /.git/HEAD Git Repository Probe
+                </div>
+                <code class="preset-code">GET /.git/HEAD</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/.git/HEAD', {}, null, 'Honeypot: /.git/HEAD Probe')">Probe Trap</button>
+            </div>
+
+            <div class="preset-item">
+              <div class="preset-info">
+                <div class="preset-name">
+                  <span class="badge-type badge-attack">HONEYPOT TRAP</span>
+                  /wp-admin WordPress Scanner Probe
+                </div>
+                <code class="preset-code">GET /wp-admin</code>
+              </div>
+              <button class="btn btn-danger" onclick="sendReq('GET', '/wp-admin', {}, null, 'Honeypot: /wp-admin Probe')">Probe Trap</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tab: Custom Payload -->
+      <div id="tab-custom" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title">Custom Payload Tester</div>
+            <div class="card-desc">Send arbitrary HTTP methods, endpoints, headers, and bodies against the NextGuard engine.</div>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+            <div style="display: flex; gap: 10px;">
+              <select id="custom-method" style="background: var(--card-inner); border: 1px solid var(--border); color: #fff; padding: 8px 12px; border-radius: 8px; font-weight: 600;">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+                <option value="PUT">PUT</option>
+                <option value="DELETE">DELETE</option>
+              </select>
+              <input type="text" id="custom-url" value="/api/search?q=test" style="flex: 1; background: var(--card-inner); border: 1px solid var(--border); color: #fff; padding: 8px 14px; border-radius: 8px; font-family: var(--font-mono); font-size: 13px;" placeholder="/api/endpoint">
+            </div>
+
+            <div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Request Body (JSON / Text)</div>
+              <textarea id="custom-body" rows="4" style="width: 100%; background: var(--card-inner); border: 1px solid var(--border); color: #fff; padding: 10px; border-radius: 8px; font-family: var(--font-mono); font-size: 12px;"></textarea>
+            </div>
+
+            <div>
+              <button class="btn btn-primary" onclick="sendCustomPayload()">Dispatch Request</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right: Live Inspection Console -->
+    <div class="console-panel">
+      <div class="console-header">
+        <div class="console-title">
+          <svg width="14" height="14" fill="none" viewBox="0 0 24 24">
+            <path d="M4 17l6-6-6-6M12 19h8" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          Live Telemetry & Event Stream
+        </div>
+        <button class="btn" style="padding: 4px 8px; font-size: 11px;" onclick="clearLocalLogs()">Clear</button>
+      </div>
+
+      <div class="console-logs" id="console-logs">
+        <div style="text-align: center; color: var(--text-dim); padding: 40px 10px;">
+          Ready. Click any attack or safe button on the left to fire a test request.
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    // Tab switching
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      event.currentTarget.classList.add('active');
+      document.getElementById(tabId).classList.add('active');
+    }
+
+    // Telemetry polling
+    async function updateStats() {
+      try {
+        const res = await fetch('/api/status');
+        const data = await res.json();
+        if (data.ok && data.stats) {
+          document.getElementById('stat-blocked').textContent = data.stats.totalBlocked.toLocaleString();
+          if (document.getElementById('stat-destroyed')) {
+            document.getElementById('stat-destroyed').textContent = (data.stats.totalForceTerminated || 0).toLocaleString();
+          }
+          const bansCount = data.banned ? data.banned.length : 0;
+          document.getElementById('stat-bans').textContent = bansCount.toLocaleString();
+          document.getElementById('stat-mode').textContent = data.stats.operationalMode || 'full_protection';
+
+          const banner = document.getElementById('ban-banner');
+          if (banner) {
+            if (bansCount > 0) {
+              banner.style.display = 'flex';
+              const ips = data.banned.map(b => b.ip).join(', ');
+              document.getElementById('ban-banner-msg').textContent =
+                `Your IP (${ips}) is currently BANNED by NextGuard auto-ban! All incoming requests will be rejected with 403 Forbidden.`;
+            } else {
+              banner.style.display = 'none';
+            }
+          }
+        }
+      } catch (err) {}
+    }
+    setInterval(updateStats, 2000);
+    updateStats();
+
+    // Log rendering
+    const localLogs = [];
+    function appendLog(entry) {
+      const container = document.getElementById('console-logs');
+      if (localLogs.length === 0) container.innerHTML = '';
+      localLogs.unshift(entry);
+
+      const div = document.createElement('div');
+      div.className = 'log-entry';
+      
+      const statusClass = entry.status === 200 ? 'status-200' :
+                         entry.status === 403 ? 'status-403' :
+                         entry.status === 413 ? 'status-413' :
+                         entry.status === 429 ? 'status-429' : 'status-503';
+
+      div.innerHTML = `
+        <div class="log-top">
+          <div style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; margin-right: 8px;">
+            <span class="log-method">${entry.method}</span>
+            <span class="log-path" title="${entry.path}">${entry.path}</span>
+          </div>
+          <span class="status-badge ${statusClass}">${entry.status} ${entry.statusText}</span>
+        </div>
+        <div style="display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); margin-top: 2px;">
+          <span style="font-weight: 600;">${entry.label || 'Request'}</span>
+          <span style="color: var(--accent); font-family: var(--font-mono);">${entry.latency}ms</span>
+        </div>
+        <div class="log-desc" style="word-break: break-all;">${entry.preview}</div>
+      `;
+      container.prepend(div);
+      updateStats();
+    }
+
+    function clearLocalLogs() {
+      localLogs.length = 0;
+      document.getElementById('console-logs').innerHTML = `
+        <div style="text-align: center; color: var(--text-dim); padding: 40px 10px;">
+          Logs cleared. Ready for next test.
+        </div>
+      `;
+    }
+
+    async function unbanAll(showAlert = true) {
+      try {
+        await fetch('/api/unban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ ip: 'all' })
+        });
+        await updateStats();
+        if (showAlert) alert('NextGuard: All banned IPs have been successfully unbanned!');
+      } catch (err) {
+        if (showAlert) alert('Failed to unban IPs: ' + err);
+      }
+    }
+
+    // Generic Request Sender
+    async function sendReq(method, path, headers = {}, body = null, label = '') {
+      const start = performance.now();
+      try {
+        const res = await fetch(path, {
+          method,
+          headers: {
+            'Content-Type': 'application/json',
+            ...headers,
+          },
+          body,
+        });
+
+        const latency = Math.round(performance.now() - start);
+        let preview = '';
+        try {
+          const json = await res.json();
+          preview = JSON.stringify(json);
+        } catch {
+          preview = await res.text();
+        }
+
+        const isTerminated = res.headers.get('x-nextguard-action') === 'force_terminate';
+        const actionLabel = isTerminated ? ' [FORCE TERMINATED]' : '';
+
+        appendLog({
+          method,
+          path,
+          status: res.status,
+          statusText: res.status === 200 ? 'ALLOWED' :
+                     res.status === 413 ? `PAYLOAD TOO LARGE${actionLabel}` :
+                     (res.status === 403 ? `BLOCKED${actionLabel}` : (res.status === 429 ? 'RATE LIMITED' : 'STATUS')),
+          latency,
+          label,
+          preview: preview.slice(0, 160) || (isTerminated ? 'TCP socket severed by NextGuard Force Termination.' : 'Request completed.'),
+        });
+      } catch (err) {
+        appendLog({
+          method,
+          path,
+          status: 0,
+          statusText: 'FORCE TERMINATED (TCP RESET)',
+          latency: Math.round(performance.now() - start),
+          label,
+          preview: 'TCP socket connection forcibly destroyed by NextGuard: ' + String(err),
+        });
+      }
+    }
+
+    function sendCustomPayload() {
+      const method = document.getElementById('custom-method').value;
+      const url = document.getElementById('custom-url').value;
+      const body = document.getElementById('custom-body').value;
+      sendReq(method, url, {}, body ? body : null, 'Custom Payload');
+    }
+
+    // Payload Size Attack Tester
+    function updateSliderLabel(val) {
+      const kb = parseInt(val, 10);
+      const label = kb >= 1000 ? (kb / 1024).toFixed(2) + ' MB' : kb + ' KB';
+      document.getElementById('slider-size-label').textContent = label;
+    }
+
+    function sendCustomSizePayload() {
+      const kb = parseInt(document.getElementById('payload-slider').value, 10);
+      sendPayloadTest(kb * 1024, `Custom Payload (${(kb / 1024).toFixed(2)} MB)`);
+    }
+
+    async function sendPayloadTest(sizeBytes, label) {
+      const start = performance.now();
+      const mb = (sizeBytes / (1024 * 1024)).toFixed(2);
+      
+      // Generate synthetic dummy payload
+      const chunkSize = 10000;
+      const repeats = Math.ceil(sizeBytes / chunkSize);
+      const chunkStr = 'X'.repeat(chunkSize);
+      let payload = '';
+      for (let i = 0; i < repeats; i++) {
+        payload += chunkStr;
+      }
+      payload = payload.slice(0, sizeBytes);
+
+      try {
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+          },
+          body: payload,
+        });
+
+        const latency = Math.round(performance.now() - start);
+        let preview = '';
+        try {
+          const json = await res.json();
+          preview = JSON.stringify(json);
+        } catch {
+          preview = await res.text();
+        }
+
+        const isTerminated = res.headers.get('x-nextguard-action') === 'force_terminate';
+        const actionLabel = isTerminated ? ' [FORCE TERMINATED]' : '';
+
+        appendLog({
+          method: 'POST',
+          path: `/api/upload (${mb} MB)`,
+          status: res.status,
+          statusText: res.status === 200 ? 'ALLOWED' :
+                     res.status === 413 ? `PAYLOAD TOO LARGE${actionLabel}` :
+                     (res.status === 403 ? `BLOCKED${actionLabel}` : 'STATUS'),
+          latency,
+          label: `${label} (${mb} MB)`,
+          preview: preview.slice(0, 160) || (isTerminated ? 'TCP socket connection severed by NextGuard Force Termination.' : 'Processed.'),
+        });
+      } catch (err) {
+        appendLog({
+          method: 'POST',
+          path: `/api/upload (${mb} MB)`,
+          status: 413,
+          statusText: 'FORCE TERMINATED (TCP RESET)',
+          latency: Math.round(performance.now() - start),
+          label: `${label} (${mb} MB)`,
+          preview: `TCP Socket Destroyed: Server forcibly closed connection to prevent RAM exhaustion. (${err.message})`,
+        });
+      }
+    }
+
+    // DDoS Stress Tester
+    let ddosRunning = false;
+    async function startDdos(totalRequests, concurrency = 30) {
+      if (ddosRunning) return;
+      if (document.getElementById('chk-auto-unban')?.checked) {
+        await unbanAll(false);
+      }
+      ddosRunning = true;
+
+      document.getElementById('btn-stop-ddos').style.display = 'inline-flex';
+      let sent = 0;
+      let okCount = 0;
+      let rateCount = 0;
+      let destroyedCount = 0;
+      const startTime = performance.now();
+
+      const updateUI = () => {
+        document.getElementById('ddos-sent').textContent = sent.toLocaleString();
+        document.getElementById('ddos-200').textContent = okCount.toLocaleString();
+        document.getElementById('ddos-429').textContent = rateCount.toLocaleString();
+        if (document.getElementById('ddos-destroyed')) {
+          document.getElementById('ddos-destroyed').textContent = destroyedCount.toLocaleString();
+        }
+        const elapsedSec = Math.max(0.1, (performance.now() - startTime) / 1000);
+        document.getElementById('ddos-speed').textContent = Math.round(sent / elapsedSec).toLocaleString();
+        document.getElementById('ddos-progress').style.width = Math.min(100, Math.round((sent / totalRequests) * 100)) + '%';
+      };
+
+      async function worker() {
+        while (ddosRunning && sent < totalRequests) {
+          sent++;
+          updateUI();
+          try {
+            const res = await fetch('/api/fast-ping?seq=' + sent);
+            if (res.status === 200) {
+              okCount++;
+            } else {
+              rateCount++;
+              if (res.headers.get('x-nextguard-action') === 'force_terminate') {
+                destroyedCount++;
+              }
+            }
+          } catch (err) {
+            // Connection was forcibly severed / TCP reset by NextGuard Force Termination!
+            destroyedCount++;
+            rateCount++;
+          }
+          updateUI();
+        }
+      }
+
+      const workers = [];
+      for (let i = 0; i < concurrency; i++) workers.push(worker());
+      await Promise.all(workers);
+
+      ddosRunning = false;
+      document.getElementById('btn-stop-ddos').style.display = 'none';
+      updateUI();
+      appendLog({
+        method: 'FLOOD',
+        path: '/api/fast-ping',
+        status: destroyedCount > 0 ? 429 : 200,
+        statusText: destroyedCount > 0 ? 'FORCE TERMINATED' : 'COMPLETED',
+        latency: Math.round(performance.now() - startTime),
+        label: destroyedCount > 0 
+          ? `💥 SISTEM PENGHANCURAN PAKSA: ${destroyedCount} koneksi TCP penyerang dihancurkan!` 
+          : `Stress test finished: ${sent} sent, ${okCount} allowed, ${rateCount} throttled`,
+        preview: `Throughput: ${document.getElementById('ddos-speed').textContent} req/s | Sockets Destroyed: ${destroyedCount} | Allowed: ${okCount}`,
+      });
+    }
+
+    function stopDdos() {
+      ddosRunning = false;
+      document.getElementById('btn-stop-ddos').style.display = 'none';
+    }
+  </script>
+</body>
+</html>

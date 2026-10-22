@@ -7,8 +7,8 @@
  * Graduates to hard ban after 5 minutes.
  */
 
-import { Readable } from 'node:stream'
-import type { ServerResponse } from 'node:http'
+// Node.js ServerResponse type is only used as a type annotation
+type ServerResponse = any
 
 const MAX_CONCURRENT = 500
 const GRADUATED_BAN_THRESHOLD_MS = 5 * 60_000  // 5 minutes
@@ -25,17 +25,23 @@ interface TarpitState {
 interface ActiveTarpit {
   ip: string
   startedAt: number
-  timer: NodeJS.Timeout
+  timer: any
 }
 
 export class TarpitManager {
   private states = new Map<string, TarpitState>()
   private active = new Set<ActiveTarpit>()
-  private cleanupTimer: NodeJS.Timeout
+  private cleanupTimer?: any
 
   constructor() {
-    this.cleanupTimer = setInterval(() => this.cleanup(), 60_000)
-    if (this.cleanupTimer.unref) this.cleanupTimer.unref()
+    const isEdge = typeof EdgeRuntime !== 'undefined' ||
+      (typeof process !== 'undefined' && process.env?.NEXT_RUNTIME === 'edge')
+    if (!isEdge) {
+      this.cleanupTimer = setInterval(() => this.cleanup(), 60_000)
+      if (this.cleanupTimer && typeof this.cleanupTimer.unref === 'function') {
+        this.cleanupTimer.unref()
+      }
+    }
   }
 
   /**
@@ -76,29 +82,34 @@ export class TarpitManager {
 
     const delayMs = state.delayMs
 
-    // Send chunked response headers
-    res.writeHead(200, {
-      'Content-Type': 'application/octet-stream',
-      'Transfer-Encoding': 'chunked',
-      'X-Content-Type-Options': 'nosniff',
-    })
-
-    const drip = new Readable({ read() {} })
-    drip.pipe(res)
+    // Send chunked response headers if supported
+    if (typeof res?.writeHead === 'function') {
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Transfer-Encoding': 'chunked',
+        'X-Content-Type-Options': 'nosniff',
+      })
+    }
 
     const activeTarpit: ActiveTarpit = { ip, startedAt: now, timer: null! }
     this.active.add(activeTarpit)
 
-    // Send 1 byte every second — non-blocking
+    // Send 1 byte every second — non-blocking via res.write
     const dripTimer = setInterval(() => {
       const elapsed = Date.now() - activeTarpit.startedAt
-      if (!drip.push(Buffer.alloc(1, 0x00))) {
-        clearInterval(dripTimer)
-        this.active.delete(activeTarpit)
+      const chunk = typeof Buffer !== 'undefined' ? Buffer.alloc(1, 0x00) : new Uint8Array(1)
+      if (typeof res?.write === 'function') {
+        const ok = res.write(chunk)
+        if (!ok) {
+          clearInterval(dripTimer)
+          this.active.delete(activeTarpit)
+        }
       }
       if (elapsed >= delayMs) {
         clearInterval(dripTimer)
-        drip.push(null)
+        if (typeof res?.end === 'function') {
+          res.end()
+        }
         this.active.delete(activeTarpit)
 
         // Graduate to ban if held for > 5 minutes (automated tool)

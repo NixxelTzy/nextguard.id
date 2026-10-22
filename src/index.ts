@@ -11,7 +11,7 @@
 // ─── Primary exports ──────────────────────────────────────────────────────────
 
 // Next.js adapter (zero-config default)
-export { nextguard, middleware } from './adapters/nextjs.js'
+export { nextguard, middleware, nextguard as createNextGuardMiddleware } from './adapters/nextjs.js'
 
 // Express adapter
 export { nextguardExpress } from './adapters/express.js'
@@ -106,3 +106,33 @@ export type { AdminRoutesConfig } from './admin-routes.js'
 // ─── Built-in Telegram alerts ──────────────────────────────────────────────────
 export { TelegramAlerter } from './telegram.js'
 export type { TelegramConfig, TelegramAlertEvent } from './telegram.js'
+
+// ─── AI & Machine Learning Adaptive Defense ──────────────────────────────────
+export {
+  AiDefenseEngine,
+  AiFeaturePipeline,
+  NeuralNetworkClassifier,
+  ReconstructionAutoencoder,
+  IsolationForest,
+  AdaptiveAutoCalibrator,
+  AdversarialSanitizer,
+  BehavioralCusumDetector,
+  StandardScaler,
+  DEFAULT_ARTIFACTS,
+  loadModelArtifacts,
+} from './ai/index.js'
+export type {
+  AiDefenseConfig,
+  AiInferenceResult,
+  AiDefenseStats,
+  AiClassifierPrediction,
+  AiAutoencoderResult,
+  AiIsolationForestResult,
+  AiCusumResult,
+  AiCalibrationStatus,
+  AiAdversarialAnalysis,
+  AiFeatureAttribution,
+  AiOperationalMode,
+} from './ai/index.js'
+
+

@@ -16,8 +16,9 @@ export function detectHostHeaderInjection(
     return signal('absolute_uri_host', `Host: ${host}`)
   }
 
-  // Internal IP in Host header (SSRF via Host)
-  if (/^(?:localhost|127\.|10\.|172\.1[6-9]\.|172\.2\d\.|172\.3[01]\.|192\.168\.|169\.254\.)/i.test(host)) {
+  // Internal IP in Host header (SSRF via Host) — only enforced in production without local override
+  const isLocalEnv = typeof process !== 'undefined' && (process.env.NODE_ENV === 'development' || process.env.NODE_ENV === 'test' || process.env.NEXTGUARD_ALLOW_LOCALHOST === 'true' || !process.env.NODE_ENV)
+  if (!isLocalEnv && /^(?:localhost|127\.|10\.|172\.1[6-9]\.|172\.2\d\.|172\.3[01]\.|192\.168\.|169\.254\.)/i.test(host)) {
     return signal('internal_ip_host', `Host: ${host}`)
   }
 

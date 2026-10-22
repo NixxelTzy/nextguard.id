@@ -42,8 +42,9 @@ function loadGeoReaders(): void {
 
   try {
     // Use createRequire to work in both CJS and ESM
-    const { createRequire } = require('node:module')
-    const req = createRequire(import.meta?.url ?? __filename)
+    const rq = new Function('m', 'return require(m)'); const { createRequire } = rq('module')
+    const req = typeof __filename !== 'undefined' ? createRequire(__filename) : createRequire(process.cwd() + '/package.json')
+
 
     const { Reader } = req('@maxmind/geoip2-node')
     const path = req('node:path')
@@ -165,3 +166,4 @@ export function getIpProfile(ip: string): IpProfile | undefined {
 export function isIpWhitelisted(ip: string, whitelist: string[]): boolean {
   return ipMatchesList(ip, whitelist)
 }
+

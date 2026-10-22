@@ -13,7 +13,7 @@
  *   - Node.js TLS socket hooks (not available in Edge)
  */
 
-export { nextguard, middleware } from './adapters/nextjs.js'
+export { nextguard, middleware, nextguard as createNextGuardMiddleware } from './adapters/nextjs.js'
 export { createFirewall, createFirewall as createEdgeFirewall } from './firewall-edge.js'
 export type {
   FirewallConfig,

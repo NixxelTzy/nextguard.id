@@ -20,6 +20,8 @@ interface TokenBucketState {
 interface RateLimitEntry {
   count: number
   windowStart: number
+  secondStart: number
+  secondCount: number
 }
 
 export interface RateLimitResult {
@@ -28,6 +30,7 @@ export interface RateLimitResult {
   resetAt: number
   delay?: number
   retryAfter?: number
+  isBurstFlood?: boolean
 }
 
 const THROTTLE_DELAYS = [0, 100, 500, 1000]  // ms per level
@@ -47,12 +50,13 @@ export class RateLimiter {
   check(ip: string, config: RateLimitConfig): RateLimitResult {
     const now = Date.now()
     const adjustedMax = this.getAdjustedMax(config.maxRequests)
+    const secondWindow = Math.floor(now / 1000)
 
     // Sliding window counter
     let entry = this.store.get(ip)
     if (!entry || now - entry.windowStart >= config.windowMs) {
       const oldBaseline = entry?.count ?? 0
-      entry = { count: 1, windowStart: now }
+      entry = { count: 1, windowStart: now, secondStart: secondWindow, secondCount: 1 }
       this.store.set(ip, entry)
 
       // Update bucket baseline
@@ -67,6 +71,25 @@ export class RateLimiter {
 
     entry.count++
     const resetAt = entry.windowStart + config.windowMs
+
+    // Per-second burst protection: instantly catches multi-worker DoS tools
+    if (!entry.secondStart || entry.secondStart !== secondWindow) {
+      entry.secondStart = secondWindow
+      entry.secondCount = 1
+    } else {
+      entry.secondCount++
+    }
+
+    const maxBurst = config.burstLimit ?? 20 // Default 20 req/s burst limit
+    if (entry.secondCount > maxBurst) {
+      return {
+        allowed: false,
+        remaining: 0,
+        resetAt: (secondWindow + 1) * 1000,
+        retryAfter: 1,
+        isBurstFlood: true,
+      }
+    }
 
     // Spike detection: 10x baseline
     const bucket = this.buckets.get(ip)
@@ -133,6 +156,10 @@ export class RateLimiter {
       'X-RateLimit-Reset': String(resetAt),
       'X-RateLimit-Policy': `${adjustedMax};w=${Math.floor(config.windowMs / 1000)}`,
     }
+  }
+
+  getCount(ip: string): number {
+    return this.store.get(ip)?.count ?? 0
   }
 
   setSystemLoad(load: number): void {

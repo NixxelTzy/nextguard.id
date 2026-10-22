@@ -69,6 +69,13 @@ export async function nextguardPlugin(
       const result = await firewall(req)
 
       if (result && result.status !== 200) {
+        const isForceTerminate = result.headers.get('x-nextguard-action') === 'force_terminate' || config.forceTerminate
+        if (isForceTerminate && reply.raw?.socket?.destroy) {
+          reply.hijack()
+          reply.raw.socket.destroy()
+          return
+        }
+
         const secHeaders = buildSecurityHeaders(config.securityHeaders)
         for (const [k, v] of Object.entries(secHeaders)) {
           reply.header(k, v)
@@ -117,7 +124,11 @@ export async function nextguardPlugin(
           matchPath(r.path, urlObj.pathname)
         )
 
-        if (matchedRule?.forceTerminate && reply.raw?.socket?.destroy) {
+        const isForceTerminate = matchedRule?.forceTerminate ||
+          result.headers.get('x-nextguard-action') === 'force_terminate' ||
+          config.forceTerminate
+
+        if (isForceTerminate && reply.raw?.socket?.destroy) {
           reply.hijack()
           reply.raw.socket.destroy()
           return

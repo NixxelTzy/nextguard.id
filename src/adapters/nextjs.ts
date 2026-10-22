@@ -2,9 +2,7 @@
  * NextGuard — Next.js Middleware Adapter
  *
  * Compatible with Next.js 13+ middleware.ts (Edge Runtime + Node.js Runtime).
- * Zero-config: export { nextguard as middleware } from '@nextguard/nextguard'
- *
- * Edge Runtime compatible — detects runtime and uses appropriate firewall.
+ * Zero-config: export { nextguard as middleware } from 'nextguard-firewall'
  */
 
 import { createFirewall } from '../firewall-edge.js'
@@ -21,66 +19,70 @@ declare const NextResponse: {
 
 type NextMiddlewareFn = (req: Request) => Promise<Response | undefined>
 
-const isEdgeRuntime = () =>
-  typeof EdgeRuntime !== 'undefined' ||
-  (typeof process !== 'undefined' && process.env.NEXT_RUNTIME === 'edge')
-
-declare const EdgeRuntime: string | undefined
+const isStaticAsset = (pathname: string): boolean => {
+  return (
+    pathname.startsWith('/_next/') ||
+    pathname.startsWith('/static/') ||
+    pathname === '/favicon.ico' ||
+    pathname === '/robots.txt' ||
+    pathname === '/sitemap.xml' ||
+    /\.(?:ico|png|jpg|jpeg|gif|webp|svg|css|js|map|woff|woff2|ttf|eot|otf)$/i.test(pathname)
+  )
+}
 
 /**
  * Create a Next.js middleware function with optional config.
  *
  * Usage in middleware.ts:
- *   export { nextguard as middleware } from '@nextguard/nextguard'
+ *   export { nextguard as middleware } from 'nextguard-firewall'
  *   -- or --
- *   import { nextguard } from '@nextguard/nextguard'
+ *   import { nextguard } from 'nextguard-firewall'
  *   export const middleware = nextguard({ ... })
  */
 export function nextguard(config: FirewallConfig = {}): NextMiddlewareFn {
   const firewall = createFirewall(config)
 
   return async function nextguardMiddleware(req: Request): Promise<Response | undefined> {
+    const url = new URL(req.url)
+    const pathname = url.pathname
 
-    // Reconstruct a standard Request — handles both Next.js Request and standard Request
-    let request: Request
-    try {
-      const headers = new Headers()
-      req.headers.forEach((v, k) => headers.set(k, v))
-
-      request = new Request(req.url, {
-        method: req.method,
-        headers,
-        body: req.method !== 'GET' && req.method !== 'HEAD'
-          ? req.clone().body
-          : null,
-      })
-    } catch {
-      request = req
+    // 1. Bypass static assets & Next.js internal chunks (prevents false-positive DoS/burst bans)
+    if (isStaticAsset(pathname)) {
+      return undefined
     }
 
-    const result = await firewall(request)
+    // 2. Clone request safely so the original body stream is NEVER drained or locked
+    let firewallReq: Request
+    try {
+      firewallReq = req.clone()
+    } catch {
+      firewallReq = req
+    }
+
+    const result = await firewall(firewallReq)
 
     if (result !== undefined) {
-      // Blocked — return the block response directly
-      if (isEdgeRuntime() && result.headers?.get?.('x-nextguard-force-terminate')) {
-        return new Response(null, { status: 444 })
-      }
-      const secHeaders = buildSecurityHeaders(config.securityHeaders)
+      const secHeaders = buildSecurityHeaders(config.securityHeaders, pathname)
       let body: string
       try {
         body = await result.clone().text()
       } catch {
-        body = JSON.stringify({ error: 'Forbidden', reason: 'attack_detected' })
+        body = JSON.stringify({ error: 'Forbidden', reason: 'request_blocked' })
       }
+
+      // Return clean, compliant status (403 Forbidden or 429 Too Many Requests)
       return new Response(body, {
-        status: result.status,
-        headers: { 'Content-Type': 'application/json', ...secHeaders },
+        status: result.status || 403,
+        headers: {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store, max-age=0',
+          ...secHeaders,
+        },
       })
     }
 
     // Allowed — pass through with security headers injected
-    const url = new URL(req.url)
-    const secHeaders = buildSecurityHeaders(config.securityHeaders, url.pathname)
+    const secHeaders = buildSecurityHeaders(config.securityHeaders, pathname)
 
     // Use NextResponse.next() to pass through with headers
     const NR = (globalThis as Record<string, unknown>)['NextResponse'] as typeof NextResponse | undefined
@@ -100,5 +102,6 @@ export function nextguard(config: FirewallConfig = {}): NextMiddlewareFn {
 }
 
 // Zero-config default export
-// Usage: export { middleware } from '@nextguard/nextguard'
+// Usage: export { middleware } from 'nextguard-firewall'
 export const middleware = nextguard()
+export { nextguard as createNextGuardMiddleware }

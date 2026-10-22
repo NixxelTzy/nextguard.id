@@ -24,9 +24,11 @@ export function normalize(input: string): NormalizationResult {
     return { original: input ?? '', normalized: input ?? '', steps: [], passCount: 0 }
   }
 
-  const original = input
+  // Cap per-field input at 64 KB to protect CPU against ReDoS on large payloads
+  const target = input.length > 65536 ? input.slice(0, 65536) : input
+  const original = target
   const steps: NormalizationStep[] = []
-  let current = input
+  let current = target
   let passCount = 0
 
   for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {

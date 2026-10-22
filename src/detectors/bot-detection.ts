@@ -32,9 +32,10 @@ const MALICIOUS_UA_SUBSTRINGS: string[] = [
   'nuclei', 'subfinder', 'amass', 'httpx', 'waybackurls', 'gospider',
   'hakrawler', 'aquatone', 'eyewitness', 'shodan', 'censys', 'binaryedge',
   'fofa', 'greynoise',
-  // HTTP attack tools
+  // HTTP attack tools & flooders
   'slowloris', 'slowhttptest', 'hping', 'goldeneye', 'tor-hammer',
-  'loic', 'hoic', 'ddosim', 'hulk',
+  'loic', 'hoic', 'ddosim', 'hulk', 'autocannon', 'bombardier', 'wrk',
+  'artillery', 'locust', 'gatling', 'tsung', 'dos-worker', 'ddos', 'flood',
   // Generic attack indicators in UA
   'scanner', 'exploit', 'attack', 'inject', 'pentest', 'vuln',
   'hack', 'pwn', 'payload', 'shellcode', 'rootkit',

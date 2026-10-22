@@ -62,6 +62,7 @@ import { scoreTlsFingerprint } from './tls/ja3.js'
 import { RecoveryWatchdog } from './recovery/watchdog.js'
 import { getRedisState } from './redis-state.js'
 import { TelegramAlerter } from './telegram.js'
+import { AiDefenseEngine } from './ai/index.js'
 
 import type {
   FirewallConfig,
@@ -72,6 +73,7 @@ import type {
   FirewallStats,
   OperationalMode,
   LogEvent,
+  RateLimitConfig,
 } from './types.js'
 
 // ─── Bulkhead isolation wrapper ───────────────────────────────────────────────
@@ -79,9 +81,14 @@ async function runSafe<T>(fn: () => T | Promise<T>): Promise<T | null> {
   try { return await fn() } catch { return null }
 }
 
-function jsonResponse(status: number, error: string, reason: string): Response {
+function jsonResponse(status: number, error: string, reason: string, forceTerminate = false): Response {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+  if (forceTerminate) {
+    headers['X-NextGuard-Action'] = 'force_terminate'
+    headers['Connection'] = 'close'
+  }
   return new Response(JSON.stringify({ error, reason }), {
-    status, headers: { 'Content-Type': 'application/json' },
+    status, headers,
   })
 }
 
@@ -119,9 +126,11 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   const autoTuner = new AutoTuner()
   const honeypot  = new HoneypotSystem(config.honeypot?.customPaths)
   const tarpit    = new TarpitManager()
+  const aiEngine  = new AiDefenseEngine(config.aiDefense)
   const watchdog  = new RecoveryWatchdog(5_000, {
     info: (e: object) => logger.info(e as Omit<LogEvent, 'timestamp'>),
   })
+  const ipActiveConnections = new Map<string, number>()
 
   // Distributed Redis state (for Vercel serverless persistence)
   const redisConfig = config.store?.type === 'redis'
@@ -143,9 +152,10 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   watchdog.register({ name: 'rate_limiter', healthCheck: () => rateLimiter.cleanup() })
   watchdog.register({ name: 'behavioral',   healthCheck: () => behavioral.pruneExpiredData() })
   watchdog.register({ name: 'auto_ban',     healthCheck: () => {} })
+  watchdog.register({ name: 'ai_engine',    healthCheck: () => {} })
   watchdog.start()
 
-  logger.info({ event: 'nextguard_started', mode: 'auto', layers: 7, detectorsActive: 17 })
+  logger.info({ event: 'nextguard_started', mode: 'auto', layers: 8, detectorsActive: 17, aiDefenseActive: aiEngine.isEnabled() })
 
   // ─── Pending stats for dashboard reporting ────────────────────────────────
   const _pending = {
@@ -159,6 +169,37 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
     _pending.blocked++
     if (attackType) {
       _pending.attacks[attackType] = (_pending.attacks[attackType] ?? 0) + 1
+    }
+  }
+
+  function dispatchBlock(
+    clientIp: string,
+    pathname: string,
+    method: string,
+    requestId: string,
+    attackType: string,
+    compositeScore = 1.0,
+    primary?: ThreatSignal | null,
+  ): void {
+    _recordBlock(attackType)
+    const blockEvent = {
+      ip: clientIp,
+      attackType,
+      path: pathname,
+      method,
+      requestId,
+      compositeScore,
+      timestamp: Date.now(),
+    }
+    if (config.onBlockEvent) {
+      Promise.resolve(config.onBlockEvent(blockEvent)).catch(() => {})
+    }
+    listeners.block?.forEach(fn => { try { fn(blockEvent) } catch {} })
+    if (primary) {
+      listeners.attack?.forEach(fn => { try { fn(primary) } catch {} })
+    }
+    if (telegramAlerter) {
+      telegramAlerter.alert(blockEvent).catch(() => {})
     }
   }
 
@@ -196,6 +237,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
     const arrivalTimestamp = Date.now()
     const layerTrace: LayerTraceEntry[] = []
     const allSignals: ThreatSignal[]    = []
+    let clientIp = ''
 
     emergencyShield.increment()
     _pending.requests++
@@ -215,9 +257,25 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       const headersObj: Record<string, string> = {}
       req.headers.forEach((v, k) => { headersObj[k.toLowerCase()] = v })
 
-      const clientIp       = extractClientIp(headersObj)
+      clientIp             = extractClientIp(headersObj)
+      const currentConn    = (ipActiveConnections.get(clientIp) ?? 0) + 1
+      ipActiveConnections.set(clientIp, currentConn)
+
       const contentType    = headersObj['content-type'] ?? ''
       const contentEncoding = headersObj['content-encoding'] ?? ''
+
+      const recordBlock = (attackType: string, score = 1.0, primary?: ThreatSignal | null) => {
+        dispatchBlock(clientIp, pathname, req.method, requestId, attackType, score, primary)
+      }
+
+      // ── Pre-read Content-Length Size Check (Memory Protection) ───────
+      const maxPayload = config.maxPayloadSize ?? (1024 * 1024) // default 1 MB
+      const declaredLen = parseInt(headersObj['content-length'] || '0', 10)
+      if (declaredLen > maxPayload) {
+        recordBlock('payload_too_large')
+        logger.info({ event: 'attack_blocked', clientIp, attackType: 'payload_too_large', path: pathname, requestId, statusCode: 413, layerTrace })
+        return jsonResponse(413, 'Payload Too Large', 'payload_too_large', true)
+      }
 
       // ── Read body ─────────────────────────────────────────────────────
       let rawBody    = ''
@@ -225,9 +283,10 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       try {
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           rawBody = await req.text()
-          if (rawBody.length > 10 * 1024 * 1024) {
-            _recordBlock('payload_too_large')
-            return jsonResponse(413, 'Payload Too Large', 'payload_too_large')
+          if (rawBody.length > maxPayload) {
+            recordBlock('payload_too_large')
+            logger.info({ event: 'attack_blocked', clientIp, attackType: 'payload_too_large', path: pathname, requestId, statusCode: 413, layerTrace })
+            return jsonResponse(413, 'Payload Too Large', 'payload_too_large', true)
           }
           if (/json/i.test(contentType)) {
             try { parsedBody = JSON.parse(rawBody) } catch { /* use raw */ }
@@ -240,7 +299,11 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
       // ── Normalize ─────────────────────────────────────────────────────
       const SKIP_HEADERS = new Set(['accept', 'accept-encoding', 'accept-language', 'connection', 'host', 'cache-control'])
-      const scanBody = sanitizePayloadForDetection(rawBody, parsedBody)
+      const MAX_SCAN_BODY_LEN = 64 * 1024 // 64 KB deep inspection limit
+      const scanBody = sanitizePayloadForDetection(
+        rawBody.length > MAX_SCAN_BODY_LEN ? rawBody.slice(0, MAX_SCAN_BODY_LEN) : rawBody,
+        parsedBody
+      )
       const allFields: Record<string, string> = { url: pathname, body: scanBody, ...query }
       for (const [k, v] of Object.entries(headersObj)) {
         if (!SKIP_HEADERS.has(k)) allFields[`header:${k}`] = v
@@ -250,7 +313,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       // ── Custom rule allow-bypass ──────────────────────────────────────
       const matchedRule = config.rules?.find(r => matchPath(r.path, pathname))
       if (matchedRule?.action === 'allow') {
-        return new Response(null, { status: 200, headers: buildSecurityHeaders(config.securityHeaders, pathname) })
+        return undefined
       }
 
       // ── Honeypot ──────────────────────────────────────────────────────
@@ -260,7 +323,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
           updateIpProfile(clientIp, { honeypotTriggered: true })
           autoBan.banWithRedis(clientIp, 'honeypot_triggered', 24 * 60 * 60_000, redisState)
           logger.info({ event: 'honeypot_triggered', clientIp, path: pathname, requestId })
-          _recordBlock('honeypot_triggered')
+          recordBlock('honeypot_triggered')
           const delay = config.honeypot?.responseDelay ?? (10_000 + Math.random() * 20_000)
           await new Promise(r => setTimeout(r, Math.min(delay, 30_000)))
           return new Response(hp.responseBody, { status: 200, headers: { 'Content-Type': hp.contentType } })
@@ -279,13 +342,14 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       if (isClientBanned) {
         layerTrace[0].result = 'block'
         layerTrace[0].durationMs = Date.now() - l1
-        _recordBlock('ip_banned')
+        recordBlock('ip_banned')
         logger.info({ event: 'attack_blocked', clientIp, attackType: 'ip_banned', path: pathname, requestId, statusCode: 403, layerTrace })
-        return jsonResponse(403, 'Forbidden', 'ip_banned')
+        // If an IP is already banned and keeps hitting the server: FORCE TERMINATE TCP connection immediately!
+        return jsonResponse(403, 'Forbidden', 'ip_banned', true)
       }
 
       if (ipWhitelist.length > 0 && isIpWhitelisted(clientIp, ipWhitelist)) {
-        return new Response(null, { status: 200, headers: buildSecurityHeaders(config.securityHeaders, pathname) })
+        return undefined // Whitelisted: allow request to proceed directly without interception
       }
 
       const ipProfile = await runSafe(() => classifyIp(clientIp))
@@ -301,32 +365,52 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
         }
         if (ipReputation.length > 0 && ipMatchesList(clientIp, ipReputation)) {
           layerTrace[layerTrace.length - 1].result = 'block'
-          _recordBlock('ip_reputation')
-          return jsonResponse(403, 'Forbidden', 'ip_reputation')
+          recordBlock('ip_reputation')
+          logger.info({ event: 'attack_blocked', clientIp, attackType: 'ip_reputation', path: pathname, requestId, statusCode: 403, layerTrace })
+          return jsonResponse(403, 'Forbidden', 'ip_reputation', config.forceTerminate ?? false)
         }
       }
       layerTrace[layerTrace.length - 1].durationMs = Date.now() - l1
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 2: Rate Control
+      // LAYER 2: Rate Control & DoS/DDoS Penghancuran Paksa
       // ═══════════════════════════════════════════════════════════════════
       const l2 = Date.now()
       layerTrace.push({ layer: 2, name: 'rate_control', result: 'pass', durationMs: 0 })
 
+      // ── 1. Concurrent Connection Exhaustion Shield (Slowloris / Parallel Worker Flood) ──
+      const maxConcurrent = config.heavyDefense?.concurrentLimit ?? 25
+      if (currentConn > maxConcurrent) {
+        layerTrace[layerTrace.length - 1].result = 'block'
+        layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
+        recordBlock('connection_limit_exceeded')
+        logger.warn({ event: 'connection_limit_exceeded', clientIp, currentConnections: currentConn, maxConcurrent, path: pathname, requestId })
+        // Severe connection exhaustion DoS: Auto-ban immediately & destroy socket!
+        autoBan.banWithRedis(clientIp, 'connection_limit_exceeded', 120_000, redisState)
+        return jsonResponse(429, 'Too Many Requests — Concurrent Connection Flood Terminated', 'connection_limit_exceeded', true)
+      }
+
+      // ── 2. Global Volumetric Emergency Shield ───────────────────────────
       if (emergencyShield.check(ipWhitelist.length > 0 && isIpWhitelisted(clientIp, ipWhitelist))) {
         layerTrace[layerTrace.length - 1].result = 'block'
         layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
-        _recordBlock('emergency_shield')
-        return new Response(JSON.stringify({ error: 'Service Unavailable', reason: 'emergency_shield' }), {
-          status: 503, headers: { 'Content-Type': 'application/json', 'Retry-After': '60' },
-        })
+        recordBlock('emergency_shield')
+        logger.info({ event: 'emergency_shield_activated', clientIp, path: pathname, requestId, statusCode: 503 })
+        // Emergency Shield: Massive flood ongoing — Force Terminate all non-whitelisted sockets
+        return jsonResponse(503, 'Service Unavailable', 'emergency_shield', true)
       }
 
+      // ── 3. Adaptive Micro-burst & Token Bucket Rate Limiting ─────────────
       const sensitivity    = getPathSensitivity(pathname)
       const baseline       = autoTuner.getBaseline(pathname)
-      const rateLimitConfig = config.rateLimit
+      const baseRateLimit: RateLimitConfig  = config.rateLimit
         ?? matchedRule?.rateLimit
         ?? (baseline ? { maxRequests: Math.max(baseline.hardRateLimit, 1000), windowMs: 60_000 } : getDefaultRateLimit(sensitivity))
+
+      const rateLimitConfig: RateLimitConfig = {
+        ...baseRateLimit,
+        burstLimit: config.heavyDefense?.burstLimit ?? baseRateLimit.burstLimit ?? 20,
+      }
 
       let rateResult = rateLimiter.check(clientIp, rateLimitConfig)
       if (rateResult.allowed && redisState.available) {
@@ -344,10 +428,26 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       if (!rateResult.allowed) {
         layerTrace[layerTrace.length - 1].result = 'block'
         layerTrace[layerTrace.length - 1].durationMs = Date.now() - l2
-        _recordBlock('rate_limited')
+
+        const reqCount = rateLimiter.getCount(clientIp)
+        // Check if this is an aggressive burst flood (multi-threaded DoS tool) or sustained rate overflow:
+        // TRIGGER SISTEM PENGHANCURAN PAKSA (Force Termination) to kill the DoS attack!
+        const isDdosFlood = (Boolean(rateResult.isBurstFlood) && reqCount > 50) || reqCount > Math.max(rateLimitConfig.maxRequests * 2.0, 150)
+
+        if (isDdosFlood || config.forceTerminate) {
+          recordBlock('ddos_flood')
+          // Auto-ban the attacking flood IP so subsequent requests don't consume resources
+          autoBan.banWithRedis(clientIp, 'ddos_flood', 120_000, redisState)
+          logger.warn({ event: 'ddos_flood_force_terminated', clientIp, path: pathname, requestId, requestCount: reqCount, statusCode: 429 })
+          return jsonResponse(429, 'Too Many Requests — DoS Flood Terminated', 'ddos_flood', true)
+        }
+
+        recordBlock('rate_limited')
         logger.info({ event: 'rate_limited', clientIp, path: pathname, requestId, statusCode: 429 })
+        // Normal overage — gentle 429 with Retry-After so legit users can retry
         return new Response(JSON.stringify({ error: 'Too Many Requests' }), {
-          status: 429, headers: {
+          status: 429,
+          headers: {
             'Content-Type': 'application/json',
             'Retry-After': String(rateResult.retryAfter ?? 60),
             ...rateLimiter.getHeaders(clientIp, rateLimitConfig),
@@ -366,12 +466,14 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       const totalHeaderSize = Object.entries(headersObj).reduce((a, [k, v]) => a + k.length + v.length, 0)
       if (totalHeaderSize > 16 * 1024) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        _recordBlock('header_too_large')
+        recordBlock('header_too_large')
+        logger.info({ event: 'attack_blocked', clientIp, attackType: 'header_too_large', path: pathname, requestId, statusCode: 431, layerTrace })
         return new Response('Request Header Fields Too Large', { status: 431 })
       }
       if (req.url.length > 8192) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        _recordBlock('uri_too_long')
+        recordBlock('uri_too_long')
+        logger.info({ event: 'attack_blocked', clientIp, attackType: 'uri_too_long', path: pathname, requestId, statusCode: 414, layerTrace })
         return jsonResponse(414, 'URI Too Long', 'uri_too_long')
       }
 
@@ -389,7 +491,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       if (smuggling) {
         layerTrace[layerTrace.length - 1].result = 'block'
         layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
-        _recordBlock(smuggling.attackType)
+        recordBlock(smuggling.attackType, 1.0, smuggling)
         return _blockAndLog(clientIp, pathname, requestId, 400, smuggling, layerTrace, logger, autoBan, config)
       }
 
@@ -400,7 +502,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       if (methodOverride) {
         layerTrace[layerTrace.length - 1].result = 'block'
         layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
-        _recordBlock(methodOverride.attackType)
+        recordBlock(methodOverride.attackType, 1.0, methodOverride)
         return _blockAndLog(clientIp, pathname, requestId, 405, methodOverride, layerTrace, logger, autoBan, config)
       }
       layerTrace[layerTrace.length - 1].durationMs = Date.now() - l4
@@ -438,7 +540,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       if (payloadResult) {
         if (payloadResult.blocked) {
           layerTrace[layerTrace.length - 1].result = 'block'
-          _recordBlock(payloadResult.blockReason ?? 'payload_error')
+          recordBlock(payloadResult.blockReason ?? 'payload_error')
           return jsonResponse(payloadResult.blockStatus ?? 413, payloadResult.blockReason ?? 'payload_error', payloadResult.blockReason ?? 'payload_error')
         }
         allSignals.push(...payloadResult.signals)
@@ -453,7 +555,8 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
       if (behavioral.isTempBlocked(clientIp)) {
         layerTrace[layerTrace.length - 1].result = 'block'
-        _recordBlock('behavioral_block')
+        recordBlock('behavioral_block')
+        logger.info({ event: 'behavioral_block', clientIp, path: pathname, requestId, statusCode: 403, layerTrace })
         return jsonResponse(403, 'Forbidden', 'behavioral_block')
       }
 
@@ -471,7 +574,9 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       }
 
       const behaviorProfile = await runSafe(() => behavioral.trackRequest(clientIp, pathname, undefined, rawBody.length))
-      if (behaviorProfile && behaviorProfile.anomalyScore > 0.5) {
+      // Threshold 0.75 (was 0.5) — higher bar before flagging a behavioral anomaly.
+      // This prevents normal users who refresh quickly from being treated as bots.
+      if (behaviorProfile && behaviorProfile.anomalyScore > 0.75) {
         allSignals.push({
           source: 'behavioral', weight: 0.20, score: behaviorProfile.anomalyScore,
           attackType: 'behavioral_anomaly', attackCategory: 'behavioral_anomaly',
@@ -489,46 +594,73 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
       layerTrace[layerTrace.length - 1].durationMs = Date.now() - l6
 
       // ═══════════════════════════════════════════════════════════════════
-      // LAYER 7: Composite Scoring & Action
+      // LAYER 7: AI & Machine Learning Anomaly Detection
       // ═══════════════════════════════════════════════════════════════════
       const l7 = Date.now()
-      layerTrace.push({ layer: 7, name: 'composite_scoring', result: 'pass', durationMs: 0 })
-      const composite = scoring.compute(allSignals)
+      layerTrace.push({ layer: 7, name: 'ai_ml_defense', result: 'pass', durationMs: 0 })
+
+      if (aiEngine.isEnabled()) {
+        const aiResult = await aiEngine.evaluateRequestAsync({
+          ip: clientIp,
+          url,
+          method: req.method,
+          headers: headersObj,
+          rawBody,
+          reputationScore: ipProfile ? (1.0 - ipProfile.trustScore) : 0,
+        })
+
+
+        if (aiResult.isThreat && aiResult.signals.length > 0) {
+          allSignals.push(...aiResult.signals)
+          if (aiEngine.getMode() === 'simulate') {
+            logger.info({
+              event: 'ai_threat_simulated',
+              clientIp,
+              predictedClass: aiResult.predictedClass,
+              confidence: aiResult.confidence,
+              signals: aiResult.signals.map(s => s.attackType),
+            })
+          }
+        }
+      }
       layerTrace[layerTrace.length - 1].durationMs = Date.now() - l7
+
+      // ═══════════════════════════════════════════════════════════════════
+      // LAYER 8: Composite Scoring & Action
+      // ═══════════════════════════════════════════════════════════════════
+      const l8 = Date.now()
+      layerTrace.push({ layer: 8, name: 'composite_scoring', result: 'pass', durationMs: 0 })
+      const composite = scoring.compute(allSignals)
+      layerTrace[layerTrace.length - 1].durationMs = Date.now() - l8
 
       if (composite.action === 'block' && !config.dryRun) {
         layerTrace[layerTrace.length - 1].result = 'block'
         const primary = composite.primarySignal
-        _recordBlock(primary?.attackType)
+        recordBlock(primary?.attackType ?? 'attack_detected', composite.score, primary)
+
+        const HIGH_CONFIDENCE_ATTACKS = new Set([
+          'sqli', 'xss', 'rce', 'ssti', 'ldap', 'xpath', 'nosql', 'xxe',
+          'ssrf', 'path_traversal', 'crlf', 'request_smuggling', 'prototype_pollution',
+          'ldap_injection', 'xpath_injection', 'nosql_injection', 'crlf_injection',
+          'honeypot_triggered', 'open_redirect', 'host_header_injection',
+          'zero_day_exploit', 'ai_anomaly_detected',
+        ])
+        const isCriticalAttack = primary ? HIGH_CONFIDENCE_ATTACKS.has(primary.attackType) : false
+
 
         if (primary) {
-          autoBan.banWithRedis(clientIp, primary.attackType, undefined, redisState)
+          if (isCriticalAttack) {
+            autoBan.banWithRedis(clientIp, primary.attackType, undefined, redisState)
+          } else {
+            autoBan.recordViolation(clientIp, primary.attackType)
+          }
+
           logger.info({
             event: 'attack_blocked', clientIp, method: req.method, path: pathname, requestId,
             attackType: primary.attackType, attackCategory: primary.attackCategory,
             detectedIn: primary.detectedIn, matchedPattern: primary.matchedPattern,
             compositeScore: composite.score, layerTrace, statusCode: 403,
           })
-
-          const blockEvent = {
-            ip: clientIp, attackType: primary.attackType,
-            path: pathname, method: req.method, requestId,
-            compositeScore: composite.score, timestamp: Date.now(),
-          }
-
-          // Fire onBlockEvent — use for Telegram alerts, DB logging, etc.
-          if (config.onBlockEvent) {
-            Promise.resolve(config.onBlockEvent(blockEvent)).catch(() => {})
-          }
-
-          // Fire event listeners (firewall.on('block', ...))
-          listeners.block?.forEach(fn => { try { fn(blockEvent) } catch {} })
-          listeners.attack?.forEach(fn => { try { fn(primary) } catch {} })
-
-          // Fire built-in Telegram alert if configured
-          if (telegramAlerter) {
-            telegramAlerter.alert(blockEvent).catch(() => {})
-          }
 
           if (config.onBlocked) {
             const ctx = {
@@ -550,7 +682,7 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
           }
         }
 
-        return jsonResponse(403, 'Forbidden', primary?.attackType ?? 'attack_detected')
+        return jsonResponse(403, 'Forbidden', primary?.attackType ?? 'attack_detected', Boolean(config.forceTerminate || isCriticalAttack))
       }
 
       if (composite.action === 'soft_block' && !config.dryRun) {
@@ -572,6 +704,11 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
 
     } finally {
       emergencyShield.decrement()
+      if (clientIp) {
+        const remaining = Math.max(0, (ipActiveConnections.get(clientIp) ?? 1) - 1)
+        if (remaining === 0) ipActiveConnections.delete(clientIp)
+        else ipActiveConnections.set(clientIp, remaining)
+      }
     }
   }
 
@@ -584,6 +721,9 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
   }
   instance.banIP        = (ip: string, reason = 'manual', durationMs?: number): void => {
     autoBan.banWithRedis(ip, reason, durationMs, redisState)
+  }
+  instance.getActiveConnections = (ip?: string): number => {
+    return ip ? (ipActiveConnections.get(ip) ?? 0) : emergencyShield.getActiveConnections()
   }
   instance.on           = (event: 'block' | 'attack', listener: (event: any) => void): FirewallInstance => {
     if (listeners[event]) listeners[event].push(listener)
@@ -598,7 +738,9 @@ export function createFirewall(config: FirewallConfig = {}): FirewallInstance {
     moduleHealth:      Object.fromEntries(
       Object.entries(watchdog.getModuleHealth()).map(([k, v]) => [k, v.status])
     ),
+    aiDefense:         aiEngine.getStats(),
   })
+
 
   return instance
 }
@@ -611,7 +753,10 @@ function _blockAndLog(
 ): Response {
   logger.info({ event: 'attack_blocked', clientIp, path, requestId, attackType: signal.attackType, matchedPattern: signal.matchedPattern, layerTrace, statusCode: status })
   if (!config.dryRun) autoBan.recordViolation(clientIp, signal.attackType)
-  return new Response(JSON.stringify({ error: status === 400 ? 'Bad Request' : status === 405 ? 'Method Not Allowed' : 'Forbidden', reason: signal.attackType }), {
-    status, headers: { 'Content-Type': 'application/json' },
-  })
+  return jsonResponse(
+    status,
+    status === 400 ? 'Bad Request' : status === 405 ? 'Method Not Allowed' : 'Forbidden',
+    signal.attackType,
+    config.forceTerminate ?? false
+  )
 }

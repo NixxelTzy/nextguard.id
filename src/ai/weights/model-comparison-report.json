@@ -1,0 +1,113 @@
+{
+  "evaluatedAt": "2026-10-18T13:03:49.270Z",
+  "testSetSize": 360,
+  "comparison": [
+    {
+      "name": "Gaussian Naive Bayes (Baseline)",
+      "type": "Supervised Classifier",
+      "accuracy": 94.72,
+      "macroPrecision": 94.72,
+      "macroRecall": 94.72,
+      "macroF1": 94.72,
+      "falsePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "avgLatencyMs": 0.032,
+      "throughputEventsPerSec": 31618,
+      "trainTimeMs": 33
+    },
+    {
+      "name": "Logistic Regression (Baseline)",
+      "type": "Supervised Classifier",
+      "accuracy": 67.5,
+      "macroPrecision": 67.5,
+      "macroRecall": 67.5,
+      "macroF1": 67.5,
+      "falsePositiveRate": 24.53,
+      "falseNegativeRate": 0,
+      "avgLatencyMs": 0.01,
+      "throughputEventsPerSec": 101793,
+      "trainTimeMs": 342
+    },
+    {
+      "name": "Deep MLP Classifier (Ours)",
+      "type": "Supervised Classifier",
+      "accuracy": 95.83,
+      "macroPrecision": 95.83,
+      "macroRecall": 95.83,
+      "macroF1": 95.83,
+      "falsePositiveRate": 0,
+      "falseNegativeRate": 0,
+      "avgLatencyMs": 0.031,
+      "throughputEventsPerSec": 31913,
+      "trainTimeMs": 6095
+    }
+  ],
+  "anomalyDetectors": {
+    "autoencoder": {
+      "attackRecallPct": 100,
+      "benignFprPct": 0,
+      "mseThreshold": 0.04006,
+      "avgLatencyMs": 0.024
+    },
+    "isolationForest": {
+      "attackRecallPct": 85.02,
+      "benignFprPct": 3.77,
+      "scoreThreshold": 0.58,
+      "avgLatencyMs": 0.055
+    }
+  },
+  "mlpConfusionMatrix": [
+    [
+      53,
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      60,
+      9,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      6,
+      66,
+      0,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      63,
+      0,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      57,
+      0
+    ],
+    [
+      0,
+      0,
+      0,
+      0,
+      0,
+      46
+    ]
+  ],
+  "memoryUsageMb": {
+    "heapUsed": 19.7,
+    "rss": 82.61
+  }
+}

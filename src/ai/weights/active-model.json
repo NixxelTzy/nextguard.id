@@ -1,0 +1,7 @@
+{
+  "classifierPath": "./classifier.json",
+  "scalerPath": "./scaler.json",
+  "autoencoderPath": "./autoencoder.json",
+  "mseThreshold": 0.0520522422219465,
+  "trainedAt": "2026-10-18T13:03:17.731Z"
+}

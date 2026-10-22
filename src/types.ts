@@ -43,14 +43,31 @@ export type AttackType =
   | 'bot_detected'
   // ── Runtime / pipeline types ──
   | 'ip_banned'
+  | 'ip_reputation'
   | 'rate_limited'
   | 'connection_limit_exceeded'
+  | 'emergency_shield'
+  | 'header_too_large'
+  | 'uri_too_long'
+  | 'payload_too_large'
+  | 'honeypot_triggered'
+  | 'behavioral_block'
   | 'behavioral_anomaly'
   | 'payload_anomaly'
   | 'encoding_anomaly'
   | 'compression_bomb'
   | 'distributed_attack'
+  | 'ddos_flood'
+  | 'connection_exhaustion'
   | 'bola_idor'
+  | 'attack_detected'
+  | 'force_terminated'
+  // ── AI & Machine Learning defense types ──
+  | 'zero_day_exploit'
+  | 'ai_anomaly_detected'
+  | 'port_scan'
+  | 'credential_stuffing'
+  | 'rate_limit_exceeded'
 
 // ── Signal Source ─────────────────────────────────────────────────────────────
 
@@ -62,6 +79,9 @@ export type SignalSource =
   | 'timing'           // request timing analysis
   | 'payload_entropy'  // Shannon entropy analysis
   | 'tls_fingerprint'  // JA3 / JA3S match
+  | 'machine_learning' // AI neural network classifier
+  | 'anomaly_detection'// AI autoencoder reconstruction error
+
 
 // ── Attack Category ───────────────────────────────────────────────────────────
 
@@ -231,7 +251,7 @@ export interface LayerTraceEntry {
 
 // ── Log Event ─────────────────────────────────────────────────────────────────
 
-export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug' | 'trace'
+export type LogLevel = 'silent' | 'error' | 'warn' | 'info' | 'debug' | 'trace' | 'pretty'
 
 export interface LogEvent {
   /** ISO 8601 timestamp with milliseconds */
@@ -263,6 +283,8 @@ export interface LogEvent {
   previousSensitivity?: string
   newSensitivity?: string
   totalConnections?: number
+  currentConnections?: number
+  maxConcurrent?: number
   blockedIpCount?: number
   action?: string
   mode?: string
@@ -271,7 +293,15 @@ export interface LogEvent {
   targetTool?: string
   payloadType?: string
   connectionDuration?: number
+  aiDefenseActive?: boolean
+  predictedClass?: string
+  confidence?: number
+  signals?: string[]
+  latencyMs?: number
+  count?: number
+  heapRatio?: number
 }
+
 
 // ── Countermeasure Type ───────────────────────────────────────────────────────
 
@@ -328,6 +358,7 @@ export type OperationalMode =
 export interface RateLimitConfig {
   maxRequests: number
   windowMs: number
+  burstLimit?: number // max requests per second (default: 20 req/s)
 }
 
 export interface DetectorConfig {
@@ -370,11 +401,11 @@ export interface AutoBanConfig {
 }
 
 export interface HeavyDefenseConfig {
-  /** Max concurrent connections per IP before tarpit kicks in */
+  /** Max concurrent connections per IP before force-termination kicks in (default: 25) */
   concurrentLimit?: number
-  /** Burst limit multiplier */
+  /** Burst limit: max requests per second per IP (default: 20 req/s) */
   burstLimit?: number
-  /** Global concurrent connection ceiling (triggers EmergencyShield) */
+  /** Global concurrent connection ceiling (triggers EmergencyShield, default: 10,000) */
   globalConcurrentLimit?: number
   /** Custom IP reputation list (CIDR or exact IPs) */
   ipReputation?: string[]
@@ -467,6 +498,10 @@ export interface FirewallConfig {
   onBlockEvent?: OnBlockEventCallback
   /** Strict mode — lower thresholds, block on first sign of attack */
   strictMode?: boolean
+  /** Maximum allowed request payload size in bytes (default: 1,048,576 = 1 MB) */
+  maxPayloadSize?: number
+  /** Force-terminate TCP connection immediately on blocked attacks / oversized payloads */
+  forceTerminate?: boolean
   ipWhitelist?: string[]
   geoBlocking?: GeoBlockingConfig
   honeypot?: HoneypotConfig
@@ -492,6 +527,8 @@ export interface FirewallConfig {
   readyPath?: string | false    // default: '/ready'
   livePath?: string | false     // default: '/live'
   metricsPath?: string | false  // default: false (disabled by default)
+  /** AI & Machine Learning Adaptive Firewall / Zero-day IDS config */
+  aiDefense?: import('./ai/types.js').AiDefenseConfig
 }
 
 // ── Firewall Instance & Stats ─────────────────────────────────────────────────
@@ -510,13 +547,17 @@ export interface FirewallStats {
   uptime: number
   operationalMode: OperationalMode
   moduleHealth: Record<string, 'healthy' | 'degraded' | 'circuit_open'>
+  /** AI Defense engine telemetry */
+  aiDefense?: import('./ai/types.js').AiDefenseStats
 }
+
 
 export interface FirewallInstance {
   (req: Request): Promise<Response | undefined>
   getBannedIPs(): BannedIpEntry[]
   unbanIP(ip: string): boolean
   banIP(ip: string, reason?: string, durationMs?: number): void
+  getActiveConnections?(ip?: string): number
   getStats(): FirewallStats
   /** Event hook system for custom integrations (e.g. firewall.on('block', fn)) */
   on(event: 'block' | 'attack', listener: (event: any) => void): FirewallInstance

@@ -9,8 +9,12 @@ import { LRUCache } from 'lru-cache'
 import type { BehaviorProfile } from '../types.js'
 
 const MAX_ENTRIES = 100_000
-const WINDOW_MS = 24 * 60 * 60_000   // 24 hours
-const PRUNE_INTERVAL_MS = 60_000      // 1 minute
+// Use a 10-minute rolling window instead of 24h.
+// With a 24h window, DDoS stress tests (thousands of reqs) permanently raise the anomaly
+// score for an IP, causing the next legitimate page load to be flagged as suspicious.
+// A 10-min window means the score resets after normal idle time between tests.
+const WINDOW_MS = 10 * 60_000            // 10 minutes (was 24h)
+const PRUNE_INTERVAL_MS = 60_000          // 1 minute
 
 // Recon probe paths — accessing these is suspicious
 const RECON_PATHS = new Set([

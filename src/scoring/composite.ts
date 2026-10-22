@@ -53,6 +53,8 @@ export class CompositeScoringEngine {
         ? signal.weight
         : (this.weights[signal.source] ?? DEFAULT_WEIGHTS[signal.source] ?? 0.10)
 
+
+
       rawScore += effectiveWeight * signal.score
 
       // Immediate block: very high confidence + high score signal
@@ -70,11 +72,25 @@ export class CompositeScoringEngine {
         hasJa3 = true
       }
 
-      // Track highest-confidence signal as primary
-      if (!primarySignal || signal.confidence > primarySignal.confidence) {
+      // Track highest-confidence signal as primary.
+      // Specific signature and behavioral matches ALWAYS take priority over generic AI/anomaly labels.
+      if (!primarySignal) {
         primarySignal = signal
+      } else {
+        const isCurrentGeneric = signal.source === 'anomaly_detection' || signal.source === 'machine_learning'
+        const isPrimaryGeneric = primarySignal.source === 'anomaly_detection' || primarySignal.source === 'machine_learning'
+
+        if (isPrimaryGeneric && !isCurrentGeneric) {
+          primarySignal = signal
+        } else if (!isPrimaryGeneric && isCurrentGeneric) {
+          // Keep specific signature
+        } else if (signal.confidence > primarySignal.confidence) {
+          primarySignal = signal
+        }
       }
     }
+
+
 
     // JA3 special case: flat +0.4 additive penalty
     if (hasJa3) rawScore += 0.4

@@ -7,7 +7,27 @@
  * Trigger: Composite_Score ≥ 0.9 OR honeypot triggered OR known JA3 fingerprint
  */
 
-import { Readable } from 'node:stream'
+// Stream type for non-blocking payloads
+type StreamType = any
+
+class DummyReadable {
+  static from(_: any) { return new DummyReadable() }
+  push(_?: any) {}
+  pipe(_: any) {}
+}
+
+let _ReadableClass: any = null
+function getReadable(): any {
+  if (_ReadableClass) return _ReadableClass
+  try {
+    const rq = new Function('m', 'return require(m)') as (m: string) => any
+    _ReadableClass = rq('stream').Readable
+  } catch {
+    _ReadableClass = DummyReadable
+  }
+  return _ReadableClass
+}
+const Readable = (typeof process !== 'undefined' && process.release?.name === 'node') ? getReadable() : DummyReadable
 
 export type AttackTool =
   | 'sqlmap'
@@ -33,7 +53,7 @@ export function identifyTool(userAgent: string, _ja3?: string): AttackTool {
 export interface CrashPayload {
   statusCode: number
   headers: Record<string, string>
-  stream: Readable
+  stream: StreamType
   description: string
 }
 
@@ -138,7 +158,8 @@ function vulnScannerCrash(): CrashPayload {
   setImmediate(() => {
     stream.push('HTTP/1.1 200 OK\r\n')
     // Push 100 bytes then stop — scanner waits for the rest
-    stream.push(Buffer.alloc(100, 0x41))
+    const chunk = typeof Buffer !== 'undefined' ? Buffer.alloc(100, 0x41) : new Uint8Array(100).fill(0x41)
+    stream.push(chunk)
     // Intentionally never push null
   })
 
@@ -159,7 +180,8 @@ function infiniteChunkedResponse(): CrashPayload {
 
   const timer = setInterval(() => {
     // Send 1 byte every 30 seconds — holds connection indefinitely
-    if (!stream.push(Buffer.alloc(1, 0x00))) {
+    const chunk = typeof Buffer !== 'undefined' ? Buffer.alloc(1, 0x00) : new Uint8Array(1)
+    if (!stream.push(chunk)) {
       clearInterval(timer)
     }
   }, 30_000)

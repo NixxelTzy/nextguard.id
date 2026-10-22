@@ -2,8 +2,11 @@
  * NextGuard — Client IP Extractor
  *
  * Extracts the real client IP from proxy headers.
- * Priority: leftmost non-RFC-1918 IP from X-Forwarded-For
- *           → X-Real-IP → CF-Connecting-IP → socket IP
+ * Priority: X-Vercel-Forwarded-For (Vercel Edge)
+ *           → CF-Connecting-IP (Cloudflare)
+ *           → X-Real-IP
+ *           → X-Forwarded-For (leftmost non-RFC-1918)
+ *           → X-Client-IP → Fly-Client-IP → True-Client-IP → socket IP
  */
 
 const RFC1918 = [
@@ -38,7 +41,25 @@ export function extractClientIp(
   headers: Record<string, string>,
   socketIp?: string,
 ): string {
-  // X-Forwarded-For: leftmost non-private IP
+  // 1. Vercel Edge: x-vercel-forwarded-for contains trusted client IP
+  const vercelIp = headers['x-vercel-forwarded-for']
+  if (vercelIp) {
+    const ips = vercelIp.split(',').map(s => stripPort(s.trim())).filter(Boolean)
+    for (const ip of ips) {
+      if (ip && !isPrivate(ip)) return ip
+    }
+    if (ips.length > 0 && ips[0]) return ips[0]
+  }
+
+  // 2. CF-Connecting-IP (Cloudflare)
+  const cfIp = headers['cf-connecting-ip']
+  if (cfIp) return stripPort(cfIp)
+
+  // 3. X-Real-IP (set by nginx/caddy/ingress)
+  const realIp = headers['x-real-ip']
+  if (realIp) return stripPort(realIp)
+
+  // 4. X-Forwarded-For: leftmost non-private IP
   const xff = headers['x-forwarded-for']
   if (xff) {
     const ips = xff.split(',').map(s => stripPort(s.trim())).filter(Boolean)
@@ -49,23 +70,13 @@ export function extractClientIp(
     if (ips.length > 0 && ips[0]) return ips[0]
   }
 
-  // X-Real-IP (set by nginx)
-  const realIp = headers['x-real-ip']
-  if (realIp) return stripPort(realIp)
-
-  // CF-Connecting-IP (Cloudflare)
-  const cfIp = headers['cf-connecting-ip']
-  if (cfIp) return stripPort(cfIp)
-
-  // X-Client-IP
+  // 5. Provider-specific headers
   const clientIp = headers['x-client-ip']
   if (clientIp) return stripPort(clientIp)
 
-  // Fly-Client-IP (Fly.io)
   const flyIp = headers['fly-client-ip']
   if (flyIp) return stripPort(flyIp)
 
-  // True-Client-IP (Akamai/Cloudflare Enterprise)
   const trueIp = headers['true-client-ip']
   if (trueIp) return stripPort(trueIp)
 

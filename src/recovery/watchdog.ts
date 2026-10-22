@@ -22,9 +22,10 @@ export class RecoveryWatchdog {
   private degradation = new DegradationManager()
   private timer: NodeJS.Timeout | null = null
   private readonly checkIntervalMs: number
-  private logger?: { info: (e: object) => void }
+  private logger?: { info: (e: object) => void; warn?: (e: object) => void }
+  private lastMemoryWarnAt = 0
 
-  constructor(checkIntervalMs = 5_000, logger?: { info: (e: object) => void }) {
+  constructor(checkIntervalMs = 5_000, logger?: { info: (e: object) => void; warn?: (e: object) => void }) {
     this.checkIntervalMs = checkIntervalMs
     this.logger = logger
   }
@@ -62,11 +63,17 @@ export class RecoveryWatchdog {
       await this.probe(module, breaker)
     }
 
-    // Handle memory pressure
+    // Handle memory pressure — only warn when genuinely near OOM (>=95%)
+    // Node.js routinely sits at 80-90% on fresh start; that is normal GC behaviour.
     const heap = process.memoryUsage()
     const ratio = heap.heapTotal > 0 ? heap.heapUsed / heap.heapTotal : 0
-    if (ratio > 0.80) {
-      this.logger?.info({ event: 'memory_pressure', heapRatio: ratio.toFixed(2) })
+    if (ratio >= 0.95) {
+      const now = Date.now()
+      if (now - this.lastMemoryWarnAt > 60_000) {
+        this.lastMemoryWarnAt = now
+        const log = this.logger?.warn ?? this.logger?.info
+        log?.call(this.logger, { event: 'memory_pressure', heapRatio: ratio.toFixed(2) })
+      }
     }
 
     // Update degradation mode

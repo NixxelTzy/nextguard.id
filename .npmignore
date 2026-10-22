@@ -12,3 +12,16 @@ web/
 
 # Compiled source maps
 *.map
+
+# Web test studio and temp files
+web-test/
+
+# Python caches and local virtualenvs
+**/__pycache__/
+*.pyc
+*.pyo
+machine-learning/node_modules/
+machine-learning/dist/
+machine-learning/.venv/
+machine-learning/storage/*.log
+

@@ -54,6 +54,12 @@ export class RateLimiter {
     return delays[level]
   }
 
+  getCount(ip: string): number {
+    const entry = this.store.get(ip)
+    if (!entry) return 0
+    return entry.count
+  }
+
   getHeaders(ip: string, config: RateLimitConfig): Record<string, string> {
     const entry = this.store.get(ip)
     const count = entry?.count ?? 0

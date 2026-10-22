@@ -112,8 +112,8 @@ export function detectCrlf(fields: Record<string, string>): ThreatSignal | null 
       }
     }
 
-    // Check for header injection pattern in query/body fields
-    if (HEADER_INJECTION_PATTERN.test(normalized)) {
+    // Check for header injection pattern (CRLF followed by header syntax) in query/body fields
+    if (!fieldName.startsWith('header:') && fieldName !== 'url' && /[\r\n]+[A-Za-z][A-Za-z0-9\-]{0,62}:\s*.{1,200}/m.test(normalized)) {
       return {
         source: 'signature',
         weight: 0.35,

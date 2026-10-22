@@ -28,11 +28,13 @@ export function getPathSensitivity(pathname: string): PathSensitivity {
   return 'baseline'
 }
 
-export function getDefaultRateLimit(sensitivity: PathSensitivity): { maxRequests: number; windowMs: number } {
+import type { RateLimitConfig } from './types.js'
+
+export function getDefaultRateLimit(sensitivity: PathSensitivity): RateLimitConfig {
   switch (sensitivity) {
-    case 'maximum':  return { maxRequests: 300,   windowMs: 60_000 }
-    case 'standard': return { maxRequests: 1_500, windowMs: 60_000 }
-    case 'baseline': return { maxRequests: 3_000, windowMs: 60_000 }
+    case 'maximum':  return { maxRequests: 300,   windowMs: 60_000, burstLimit: 60 }
+    case 'standard': return { maxRequests: 1_500, windowMs: 60_000, burstLimit: 120 }
+    case 'baseline': return { maxRequests: 3_000, windowMs: 60_000, burstLimit: 250 }
   }
 }
 

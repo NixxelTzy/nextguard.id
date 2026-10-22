@@ -1,31 +1,39 @@
 /**
  * NextGuard — Tor Exit Node Detector
+ * Edge Runtime compatible — Node.js fs/path loaded lazily at runtime via new Function.
  */
 
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
+declare const EdgeRuntime: string | undefined
 
 let torExitNodes: Set<string> = new Set()
 let loaded = false
 
-function getDataDir(): string {
-  try {
-    // Works in both CJS (__dirname available) and bundled output
-    return join(__dirname, '..', 'data')
-  } catch {
-    return join(process.cwd(), 'src', 'data')
-  }
-}
-
 function loadTorList(): void {
   if (loaded) return
   loaded = true
+  // Only run in full Node.js — skip Edge Runtime entirely
+  const isEdge =
+    typeof EdgeRuntime !== 'undefined' ||
+    (typeof process !== 'undefined' && process.env?.NEXT_RUNTIME === 'edge')
+  if (isEdge) return
+
   try {
-    const filePath = join(getDataDir(), 'tor-exit-nodes.txt')
-    if (!existsSync(filePath)) return
-    const content = readFileSync(filePath, 'utf8')
+    // Use new Function() so bundlers (webpack/esbuild/edge) cannot trace these requires
+    const rq = new Function('m', 'return require(m)') as (m: string) => any
+    const fsm = rq('fs') as typeof import('fs')
+    const pathm = rq('path') as typeof import('path')
+
+    let dataDir: string
+    try {
+      dataDir = pathm.join((__dirname as any) ?? '.', '..', 'data')
+    } catch {
+      dataDir = pathm.join(process.cwd(), 'src', 'data')
+    }
+    const filePath = pathm.join(dataDir, 'tor-exit-nodes.txt')
+    if (!fsm.existsSync(filePath)) return
+    const content = fsm.readFileSync(filePath, 'utf8')
     torExitNodes = new Set(
-      content.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+      content.split('\n').map((l: string) => l.trim()).filter((l: string) => l && !l.startsWith('#'))
     )
   } catch {
     torExitNodes = new Set()

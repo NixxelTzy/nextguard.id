@@ -1,11 +1,9 @@
 /**
  * NextGuard — Datacenter CIDR Matcher
+ * Edge Runtime compatible — Node.js fs/path loaded lazily via new Function.
  */
 
-import { readFileSync, existsSync } from 'node:fs'
-import { join } from 'node:path'
-
-interface DatacenterData { [provider: string]: string[] }
+declare const EdgeRuntime: string | undefined
 
 interface CidrEntry {
   provider: string
@@ -16,14 +14,6 @@ interface CidrEntry {
 let entries: CidrEntry[] = []
 let loaded = false
 
-function getDataDir(): string {
-  try {
-    return join(__dirname, '..', 'data')
-  } catch {
-    return join(process.cwd(), 'src', 'data')
-  }
-}
-
 function ipToInt(ip: string): number {
   const parts = ip.split('.').map(Number)
   if (parts.length !== 4 || parts.some(n => isNaN(n))) return -1
@@ -33,10 +23,26 @@ function ipToInt(ip: string): number {
 function loadList(): void {
   if (loaded) return
   loaded = true
+  const isEdge =
+    typeof EdgeRuntime !== 'undefined' ||
+    (typeof process !== 'undefined' && process.env?.NEXT_RUNTIME === 'edge')
+  if (isEdge) return
+
   try {
-    const filePath = join(getDataDir(), 'datacenter-cidrs.json')
-    if (!existsSync(filePath)) return
-    const data = JSON.parse(readFileSync(filePath, 'utf8')) as DatacenterData
+    const rq = new Function('m', 'return require(m)') as (m: string) => any
+    const fsm = rq('fs') as typeof import('fs')
+    const pathm = rq('path') as typeof import('path')
+
+    let dataDir: string
+    try {
+      dataDir = pathm.join((__dirname as any) ?? '.', '..', 'data')
+    } catch {
+      dataDir = pathm.join(process.cwd(), 'src', 'data')
+    }
+
+    const filePath = pathm.join(dataDir, 'datacenter-cidrs.json')
+    if (!fsm.existsSync(filePath)) return
+    const data = JSON.parse(fsm.readFileSync(filePath, 'utf8')) as { [provider: string]: string[] }
     entries = []
     for (const [provider, cidrs] of Object.entries(data)) {
       for (const cidr of cidrs) {
